@@ -77,7 +77,10 @@ class Budget:
         self.prompt_tokens += p
         self.completion_tokens += c
         self.llm_calls += 1
-        if cfg:
+        reported = usage.get("cost")  # OpenRouter reports the actual charge in USD
+        if isinstance(reported, (int, float)) and not isinstance(reported, bool):
+            self.cost_usd += float(reported)
+        elif cfg:
             self.cost_usd += p / 1e6 * cfg.price_in_per_mtok + c / 1e6 * cfg.price_out_per_mtok
 
     def exhausted(self) -> Optional[str]:

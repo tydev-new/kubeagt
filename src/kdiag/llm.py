@@ -1,5 +1,5 @@
 """LLM providers. One real client for any OpenAI-compatible chat completions API
-(xAI Grok by default), plus mock providers for tests and keyless runs.
+(OpenRouter with a Grok model by default), plus mock providers for tests and keyless runs.
 
 Only the Python standard library is used for HTTP.
 """
@@ -16,9 +16,24 @@ from typing import Any, Dict, List, Optional
 
 from .redact import redact_text
 
-DEFAULT_BASE_URL = "https://api.x.ai/v1"
-DEFAULT_MODEL = "grok-4.7"
-DEFAULT_KEY_ENV = "XAI_API_KEY"
+# Provider presets. Every field can still be overridden by env vars or CLI flags, so any
+# other OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, Azure, ...) works via "custom".
+# Model slugs change; check the provider's current model list (for OpenRouter:
+# https://openrouter.ai/models?q=grok) and override with --llm-model / KDIAG_LLM_MODEL.
+PRESETS: Dict[str, Dict[str, Any]] = {
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "x-ai/grok-4.7",
+                   "api_key_env": "OPENROUTER_API_KEY", "price_in_per_mtok": 2.0, "price_out_per_mtok": 6.0},
+    "xai": {"base_url": "https://api.x.ai/v1", "model": "grok-4.7",
+            "api_key_env": "XAI_API_KEY", "price_in_per_mtok": 2.0, "price_out_per_mtok": 6.0},
+    "openai": {"base_url": "https://api.openai.com/v1", "model": "",
+               "api_key_env": "OPENAI_API_KEY", "price_in_per_mtok": 2.0, "price_out_per_mtok": 10.0},
+    "custom": {"base_url": "", "model": "", "api_key_env": "KDIAG_LLM_API_KEY",
+               "price_in_per_mtok": 2.0, "price_out_per_mtok": 6.0},
+}
+DEFAULT_PROVIDER = "openrouter"
+DEFAULT_BASE_URL = PRESETS[DEFAULT_PROVIDER]["base_url"]
+DEFAULT_MODEL = PRESETS[DEFAULT_PROVIDER]["model"]
+DEFAULT_KEY_ENV = PRESETS[DEFAULT_PROVIDER]["api_key_env"]
 
 
 class LLMError(RuntimeError):
@@ -27,6 +42,7 @@ class LLMError(RuntimeError):
 
 @dataclass
 class LLMConfig:
+    provider: str = DEFAULT_PROVIDER
     base_url: str = DEFAULT_BASE_URL
     model: str = DEFAULT_MODEL
     api_key_env: str = DEFAULT_KEY_ENV
@@ -38,18 +54,30 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, **overrides: Any) -> "LLMConfig":
+        """Precedence: CLI overrides, then KDIAG_LLM_* env vars, then the provider preset."""
         env = os.environ
+        provider = overrides.pop("provider", None) or env.get("KDIAG_LLM_PROVIDER") or DEFAULT_PROVIDER
+        if provider not in PRESETS:
+            raise LLMError(f"unknown LLM provider {provider!r}; choose one of {', '.join(PRESETS)}")
+        p = PRESETS[provider]
         cfg = cls(
-            base_url=env.get("KDIAG_LLM_BASE_URL", DEFAULT_BASE_URL),
-            model=env.get("KDIAG_LLM_MODEL", DEFAULT_MODEL),
-            api_key_env=env.get("KDIAG_LLM_API_KEY_ENV", DEFAULT_KEY_ENV),
-            price_in_per_mtok=float(env.get("KDIAG_PRICE_IN_PER_MTOK", 2.0)),
-            price_out_per_mtok=float(env.get("KDIAG_PRICE_OUT_PER_MTOK", 6.0)),
+            provider=provider,
+            base_url=env.get("KDIAG_LLM_BASE_URL") or p["base_url"],
+            model=env.get("KDIAG_LLM_MODEL") or p["model"],
+            api_key_env=env.get("KDIAG_LLM_API_KEY_ENV") or p["api_key_env"],
+            price_in_per_mtok=float(env.get("KDIAG_PRICE_IN_PER_MTOK") or p["price_in_per_mtok"]),
+            price_out_per_mtok=float(env.get("KDIAG_PRICE_OUT_PER_MTOK") or p["price_out_per_mtok"]),
         )
         for k, v in overrides.items():
             if v is not None:
                 setattr(cfg, k, v)
         return cfg
+
+    def validate(self) -> None:
+        if not self.base_url:
+            raise LLMError(f"provider {self.provider!r} needs a base URL: set --llm-base-url or KDIAG_LLM_BASE_URL")
+        if not self.model:
+            raise LLMError(f"provider {self.provider!r} needs a model: set --llm-model or KDIAG_LLM_MODEL")
 
     def api_key(self) -> Optional[str]:
         v = os.environ.get(self.api_key_env, "").strip()
@@ -73,12 +101,19 @@ class OpenAICompatClient(ChatClient):
     """POST {base_url}/chat/completions with tool definitions."""
 
     def __init__(self, cfg: LLMConfig, api_key: Optional[str] = None, retries: int = 3):
+        cfg.validate()
         self.cfg = cfg
         self.key = api_key or cfg.api_key()
         if not self.key:
             raise LLMError(f"no API key: set {cfg.api_key_env}")
         self.retries = retries
-        self.name = f"{cfg.model} @ {cfg.base_url}"
+        self.name = f"{cfg.model} @ {cfg.base_url} ({cfg.provider})"
+
+    def _extra_headers(self) -> Dict[str, str]:
+        # Optional OpenRouter attribution headers; harmless elsewhere but only sent to OpenRouter.
+        if "openrouter.ai" in self.cfg.base_url:
+            return {"HTTP-Referer": "https://github.com/tydev-new/kdiag", "X-Title": "kdiag"}
+        return {}
 
     def chat(self, messages: List[dict], tools: List[dict]) -> ChatResponse:
         body = {"model": self.cfg.model, "messages": messages, "temperature": self.cfg.temperature}
@@ -91,7 +126,7 @@ class OpenAICompatClient(ChatClient):
         for attempt in range(self.retries + 1):
             req = urllib.request.Request(url, data=data, method="POST", headers={
                 "Content-Type": "application/json", "Authorization": f"Bearer {self.key}",
-                "User-Agent": "kdiag/0.1"})
+                "User-Agent": "kdiag/0.1", **self._extra_headers()})
             try:
                 with urllib.request.urlopen(req, timeout=self.cfg.timeout) as r:
                     payload = json.loads(r.read().decode("utf-8"))
@@ -172,12 +207,13 @@ class HintFollowingMock(ChatClient):
 
 
 def make_client(mode: str, cfg: LLMConfig) -> Optional[ChatClient]:
-    """mode: auto | none | mock | openai. auto uses the real provider when its key env var is set."""
+    """mode: auto | none | mock | live. auto uses the configured provider when its key env var is set.
+    "openai", "xai" and "grok" are accepted as older aliases of "live"."""
     if mode == "none":
         return None
     if mode == "mock":
         return HintFollowingMock()
-    if mode in ("openai", "xai", "grok"):
+    if mode in ("live", "openai", "xai", "grok"):
         return OpenAICompatClient(cfg)
     if mode == "auto":
         return OpenAICompatClient(cfg) if cfg.api_key() else None

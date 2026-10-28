@@ -15,7 +15,7 @@ from .audit import AuditLog, default_session_dir
 from .bundle import Bundle, collect
 from .health import HEALTH_KINDS
 from .kube import KubectlError, KubeTarget, KubeWriter, ReadOnlyKubectl
-from .llm import LLMConfig, LLMError, make_client
+from .llm import DEFAULT_BASE_URL, DEFAULT_KEY_ENV, DEFAULT_MODEL, DEFAULT_PROVIDER, PRESETS, LLMConfig, LLMError, make_client
 from .rules import MIN_MEMORY_MIB, run_rules
 
 
@@ -27,20 +27,25 @@ def _common(p: argparse.ArgumentParser, ns: bool = True) -> None:
 
 
 def _llm_args(p: argparse.ArgumentParser) -> None:
-    g = p.add_argument_group("LLM provider (any OpenAI-compatible chat completions API)")
-    g.add_argument("--llm", default="auto", choices=["auto", "none", "mock", "openai"],
+    g = p.add_argument_group("LLM provider (any OpenAI-compatible chat completions API; default OpenRouter)")
+    g.add_argument("--llm", default="auto", choices=["auto", "none", "mock", "live", "openai"],
                    help="auto: use the provider if its API key env var is set, else rules only (default). "
-                        "none: rules only. mock: keyless test provider. openai: require the provider.")
-    g.add_argument("--llm-base-url", help="default $KDIAG_LLM_BASE_URL or https://api.x.ai/v1")
-    g.add_argument("--llm-model", help="default $KDIAG_LLM_MODEL or grok-4.7")
-    g.add_argument("--llm-key-env", help="name of the env var holding the API key (default XAI_API_KEY)")
+                        "none: rules only. mock: keyless offline test provider, no network. "
+                        "live: require the provider (openai is an alias).")
+    g.add_argument("--llm-provider", choices=sorted(PRESETS),
+                   help=f"preset for base URL, key env var, default model and prices "
+                        f"(default $KDIAG_LLM_PROVIDER or {DEFAULT_PROVIDER}: {DEFAULT_BASE_URL}, key ${DEFAULT_KEY_ENV})")
+    g.add_argument("--llm-base-url", help="override the preset base URL ($KDIAG_LLM_BASE_URL)")
+    g.add_argument("--llm-model", help=f"override the preset model ($KDIAG_LLM_MODEL; OpenRouter default {DEFAULT_MODEL}, "
+                                       "check https://openrouter.ai/models for current slugs)")
+    g.add_argument("--llm-key-env", help="name of the env var holding the API key (preset default, e.g. OPENROUTER_API_KEY)")
     g.add_argument("--max-steps", type=int, default=12, help="max LLM turns per investigation (default 12)")
     g.add_argument("--max-tokens", type=int, default=200_000, help="token cap for the whole session (default 200000)")
     g.add_argument("--max-cost", type=float, default=0.50, help="estimated spend cap in USD for the session (default 0.50)")
 
 
 def _cfg(a) -> LLMConfig:
-    return LLMConfig.from_env(base_url=a.llm_base_url, model=a.llm_model, api_key_env=a.llm_key_env)
+    return LLMConfig.from_env(provider=getattr(a, "llm_provider", None), base_url=a.llm_base_url, model=a.llm_model, api_key_env=a.llm_key_env)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -149,8 +154,8 @@ def cmd_fix(a) -> int:
     if not kc.namespace_exists():
         print(f"namespace {a.namespace} not found (context {kc.current_context()})", file=sys.stderr)
         return 2
-    cfg = _cfg(a)
     try:
+        cfg = _cfg(a)
         llm = make_client(a.llm, cfg)
     except LLMError as e:
         print(f"LLM setup failed: {e}", file=sys.stderr)
@@ -158,6 +163,8 @@ def cmd_fix(a) -> int:
     if llm is None:
         why = "disabled" if a.llm == "none" else f"{cfg.api_key_env} not set"
         print(f"LLM: off ({why}); using deterministic rules only.")
+    elif a.llm == "mock":
+        print(f"LLM: {llm.name} (offline, no API calls)")
     else:
         print(f"LLM: {llm.name}")
     audit.write("session_start", namespace=a.namespace, context=kc.current_context(), llm=getattr(llm, "name", None),
@@ -188,10 +195,15 @@ def cmd_eval(a) -> int:
         return 2
     kc = ReadOnlyKubectl(KubeTarget("default", a.context, os.path.expanduser(a.kubeconfig) if a.kubeconfig else None))
     ctx = kc.current_context()
-    cfg = _cfg(a)
+    try:
+        cfg = _cfg(a)
+    except LLMError as e:
+        print(f"LLM setup failed: {e}", file=sys.stderr)
+        return 2
     opt = EvalOptions(os.path.expanduser(a.kubeconfig) if a.kubeconfig else None, a.context, a.llm, cfg, a.keep,
                       a.verify_timeout, a.max_steps)
-    llm_desc = a.llm if a.llm != "auto" else ("auto (" + ("key set" if cfg.api_key() else "no key, rules only") + ")")
+    llm_desc = (a.llm if a.llm == "none" else f"{a.llm} (offline, no API calls)" if a.llm == "mock"
+                else f"{a.llm} ({cfg.provider}, {cfg.model})") if a.llm != "auto" else ("auto (" + ("key set" if cfg.api_key() else "no key, rules only") + ")")
     print(f"kdiag eval: {len(scen)} scenario(s) on context {ctx}, LLM mode {llm_desc}")
     out = Path(a.out)
     results = []

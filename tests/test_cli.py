@@ -39,3 +39,18 @@ def test_expectation_checks():
     assert check_expectation(obj, {"path": "spec.nope", "absent": True})[0]
     assert check_expectation(obj, {"path": "spec.sel", "equals": {"app": "x"}})[0]
     assert not check_expectation(obj, {"path": "spec.a[0].b", "equals": 5432})[0]
+
+
+def test_fix_help_documents_openrouter_default(capsys):
+    import pytest
+    with pytest.raises(SystemExit):
+        main(["fix", "--help"])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "https://openrouter.ai/api/v1" in out and "OPENROUTER_API_KEY" in out and "--llm-provider" in out
+
+
+def test_cli_provider_flag_builds_config():
+    from kdiag.cli import _cfg, build_parser
+    a = build_parser().parse_args(["fix", "--llm-provider", "xai", "--llm-model", "grok-x"])
+    cfg = _cfg(a)
+    assert (cfg.provider, cfg.base_url, cfg.api_key_env, cfg.model) == ("xai", "https://api.x.ai/v1", "XAI_API_KEY", "grok-x")

@@ -2,7 +2,7 @@
 
 kdiag diagnoses a broken Kubernetes namespace and fixes it **one change at a time, with your approval**.
 
-It collects a redacted snapshot, runs deterministic checks, optionally lets an LLM (Grok by default)
+It collects a redacted snapshot, runs deterministic checks, optionally lets an LLM (Grok via OpenRouter by default)
 investigate with read-only kubectl tools, then proposes a single fix with the diagnosis, the evidence,
 an exact diff, and the reasoning. Nothing changes until you answer `y`. After each change kdiag waits
 for the rollout, re-checks the namespace, and feeds the new state into the next proposal.
@@ -88,31 +88,57 @@ kdiag works with no LLM at all: the deterministic rules detect and fix every bun
 With an LLM, the model leads each round. It sees the rule findings and candidate fixes, runs its own
 read-only kubectl commands, and proposes one fix (it may accept a candidate or propose a better one).
 
-Any OpenAI-compatible chat completions API with tool calling works. The default is xAI Grok:
+Any OpenAI-compatible chat completions API with tool calling works. The default provider is
+[OpenRouter](https://openrouter.ai) with a Grok model, so one key gives access to Grok and every
+other model OpenRouter serves. Each user brings their own key; kdiag never stores it.
 
 ```bash
-export XAI_API_KEY=...            # your own key; kdiag never stores it
-kdiag fix -n shop                 # --llm auto (default) uses Grok when XAI_API_KEY is set
+export OPENROUTER_API_KEY=...     # from https://openrouter.ai/settings/keys
+kdiag fix -n shop                 # --llm auto (default) uses OpenRouter when OPENROUTER_API_KEY is set
 ```
+
+The default model slug is `x-ai/grok-4.7` (Grok 4.7 as listed on OpenRouter in October 2026).
+Model slugs change often: check OpenRouter's current model list
+([openrouter.ai/models?q=grok](https://openrouter.ai/models?q=grok)) for the exact slug you want and
+set it with `--llm-model` or `KDIAG_LLM_MODEL`, for example `KDIAG_LLM_MODEL=x-ai/grok-4.6`.
 
 | Setting | Flag | Environment | Default |
 |---|---|---|---|
-| Mode | `--llm auto\|none\|mock\|openai` | | `auto` (provider if the key is set, otherwise rules only) |
-| Base URL | `--llm-base-url` | `KDIAG_LLM_BASE_URL` | `https://api.x.ai/v1` |
-| Model | `--llm-model` | `KDIAG_LLM_MODEL` | `grok-4.7` |
-| Key variable name | `--llm-key-env` | `KDIAG_LLM_API_KEY_ENV` | `XAI_API_KEY` |
+| Mode | `--llm auto\|none\|mock\|live` | | `auto` (provider if its key is set, otherwise rules only) |
+| Provider preset | `--llm-provider openrouter\|xai\|openai\|custom` | `KDIAG_LLM_PROVIDER` | `openrouter` |
+| Base URL | `--llm-base-url` | `KDIAG_LLM_BASE_URL` | from the preset (`https://openrouter.ai/api/v1`) |
+| Model | `--llm-model` | `KDIAG_LLM_MODEL` | from the preset (`x-ai/grok-4.7`) |
+| Key variable name | `--llm-key-env` | `KDIAG_LLM_API_KEY_ENV` | from the preset (`OPENROUTER_API_KEY`) |
 | Turn cap per investigation | `--max-steps` | | 12 |
 | Token cap per session | `--max-tokens` | | 200000 |
-| Estimated spend cap per session (USD) | `--max-cost` | `KDIAG_PRICE_IN_PER_MTOK`, `KDIAG_PRICE_OUT_PER_MTOK` set the prices used | 0.50 |
+| Spend cap per session (USD) | `--max-cost` | `KDIAG_PRICE_IN_PER_MTOK`, `KDIAG_PRICE_OUT_PER_MTOK` | 0.50 |
 
-Other providers, for example OpenAI or a local server:
+Flags override environment variables, which override the preset. For the spend cap kdiag uses the
+actual cost OpenRouter reports in each response (`usage.cost`); for other providers it estimates cost
+from token counts and the per-million-token prices (preset defaults, or the two env vars above).
+
+Presets:
+
+| Preset | Base URL | Key variable | Default model |
+|---|---|---|---|
+| `openrouter` (default) | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `x-ai/grok-4.7` |
+| `xai` (Grok direct) | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-4.7` |
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | none, set `--llm-model` |
+| `custom` | none, set `--llm-base-url` | `KDIAG_LLM_API_KEY` | none, set `--llm-model` |
+
+Examples:
 
 ```bash
-export KDIAG_LLM_BASE_URL=https://api.openai.com/v1 KDIAG_LLM_MODEL=gpt-4.1 KDIAG_LLM_API_KEY_ENV=OPENAI_API_KEY
-export KDIAG_LLM_BASE_URL=http://localhost:11434/v1 KDIAG_LLM_MODEL=qwen2.5 KDIAG_LLM_API_KEY_ENV=OLLAMA_KEY OLLAMA_KEY=unused
+# xAI direct
+XAI_API_KEY=... kdiag fix -n shop --llm-provider xai
+# OpenAI
+OPENAI_API_KEY=... kdiag fix -n shop --llm-provider openai --llm-model <model>
+# Local OpenAI-compatible server (Ollama, vLLM, LiteLLM, ...)
+KDIAG_LLM_API_KEY=unused kdiag fix -n shop --llm-provider custom \
+  --llm-base-url http://localhost:11434/v1 --llm-model <model>
 ```
 
-`--llm mock` is a keyless stand-in that runs the real agent loop (it calls read-only kubectl tools
+`--llm mock` is a keyless, offline stand-in (no API calls) that runs the real agent loop (it calls read-only kubectl tools
 against your cluster) and then accepts the first deterministic candidate. It has no reasoning of its
 own; it exists to test the plumbing.
 
@@ -162,7 +188,7 @@ kind create cluster --name kdiag-test --config test/kind-config.yaml
 kind load docker-image redis:7.2-alpine busybox:1.36 --name kdiag-test   # optional, avoids pulls
 kdiag eval --context kind-kdiag-test --out eval-results          # rules only
 kdiag eval --context kind-kdiag-test --llm mock                 # exercise the agent loop without a key
-XAI_API_KEY=... kdiag eval --context kind-kdiag-test --llm openai
+OPENROUTER_API_KEY=... kdiag eval --context kind-kdiag-test --llm live   # real model, your account
 ```
 
 The scorecard (`eval-results/scorecard.md` and `.json`) reports per scenario: detection, correct fix,

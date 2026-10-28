@@ -164,22 +164,83 @@ def test_client_retries_then_fails(server, monkeypatch):
         OpenAICompatClient(cfg).chat([], [])
 
 
-def test_make_client_modes(monkeypatch):
-    monkeypatch.delenv("XAI_API_KEY", raising=False)
+def _clear_llm_env(monkeypatch):
+    for k in ("KDIAG_LLM_PROVIDER", "KDIAG_LLM_BASE_URL", "KDIAG_LLM_MODEL", "KDIAG_LLM_API_KEY_ENV",
+              "KDIAG_PRICE_IN_PER_MTOK", "KDIAG_PRICE_OUT_PER_MTOK", "OPENROUTER_API_KEY", "XAI_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_default_provider_is_openrouter_with_grok(monkeypatch):
+    _clear_llm_env(monkeypatch)
     cfg = LLMConfig.from_env()
-    assert cfg.base_url == "https://api.x.ai/v1" and cfg.api_key_env == "XAI_API_KEY"
+    assert cfg.provider == "openrouter"
+    assert cfg.base_url == "https://openrouter.ai/api/v1" and cfg.api_key_env == "OPENROUTER_API_KEY"
+    assert cfg.model.startswith("x-ai/grok")
+    assert LLMConfig().base_url == cfg.base_url  # dataclass defaults match the preset
+
+
+def test_make_client_modes(monkeypatch):
+    _clear_llm_env(monkeypatch)
+    cfg = LLMConfig.from_env()
     assert make_client("auto", cfg) is None
     assert make_client("none", cfg) is None
     assert isinstance(make_client("mock", cfg), HintFollowingMock)
-    with pytest.raises(LLMError):
-        make_client("openai", cfg)
+    for mode in ("live", "openai"):
+        with pytest.raises(LLMError, match="OPENROUTER_API_KEY"):
+            make_client(mode, cfg)
     monkeypatch.setenv("XAI_API_KEY", "x")
-    assert isinstance(make_client("auto", cfg), OpenAICompatClient)
+    assert make_client("auto", cfg) is None  # a key for a different provider is not used
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    c = make_client("auto", cfg)  # constructing a client makes no network call
+    assert isinstance(c, OpenAICompatClient) and "openrouter" in c.name
+
+
+def test_xai_direct_preset(monkeypatch):
+    _clear_llm_env(monkeypatch)
+    cfg = LLMConfig.from_env(provider="xai")
+    assert (cfg.base_url, cfg.model, cfg.api_key_env) == ("https://api.x.ai/v1", "grok-4.7", "XAI_API_KEY")
+    monkeypatch.setenv("KDIAG_LLM_PROVIDER", "xai")
+    assert LLMConfig.from_env().base_url == "https://api.x.ai/v1"
+
+
+def test_custom_provider_needs_base_url_and_model(monkeypatch):
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("KDIAG_LLM_API_KEY", "k")
+    cfg = LLMConfig.from_env(provider="custom")
+    with pytest.raises(LLMError, match="base URL"):
+        OpenAICompatClient(cfg)
+    cfg = LLMConfig.from_env(provider="custom", base_url="http://localhost:11434/v1")
+    with pytest.raises(LLMError, match="model"):
+        OpenAICompatClient(cfg)
+    assert OpenAICompatClient(LLMConfig.from_env(provider="custom", base_url="http://localhost:11434/v1", model="m")).key == "k"
+
+
+def test_unknown_provider_rejected(monkeypatch):
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("KDIAG_LLM_PROVIDER", "nope")
+    with pytest.raises(LLMError, match="unknown LLM provider"):
+        LLMConfig.from_env()
 
 
 def test_config_from_env(monkeypatch):
+    _clear_llm_env(monkeypatch)
     monkeypatch.setenv("KDIAG_LLM_BASE_URL", "https://api.openai.com/v1")
     monkeypatch.setenv("KDIAG_LLM_MODEL", "gpt-x")
     monkeypatch.setenv("KDIAG_LLM_API_KEY_ENV", "OPENAI_API_KEY")
     cfg = LLMConfig.from_env(model="override")
     assert (cfg.base_url, cfg.model, cfg.api_key_env) == ("https://api.openai.com/v1", "override", "OPENAI_API_KEY")
+
+
+def test_openrouter_attribution_headers_only_for_openrouter(monkeypatch):
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    c = OpenAICompatClient(LLMConfig.from_env())
+    assert c._extra_headers()["X-Title"] == "kdiag"
+    c2 = OpenAICompatClient(LLMConfig.from_env(base_url="http://127.0.0.1:1/v1"))
+    assert c2._extra_headers() == {}
+
+
+def test_budget_prefers_reported_cost():
+    b = Budget(max_cost_usd=0.01)
+    b.add({"prompt_tokens": 10, "completion_tokens": 10, "cost": 0.02}, LLMConfig())
+    assert b.cost_usd == pytest.approx(0.02) and "spend cap" in (b.exhausted() or "")
