@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -172,6 +173,83 @@ class ScriptedLLM(ChatClient):
         return ChatResponse(step, dict(self.usage))
 
 
+RELAY_NAME = "relay (human/agent answered, not Grok)"
+
+
+def default_relay_dir() -> str:
+    return os.environ.get("KDIAG_RELAY_DIR") or os.path.join(
+        os.environ.get("KDIAG_HOME") or os.path.join(os.path.expanduser("~"), ".kdiag"), "relay")
+
+
+class RelayClient(ChatClient):
+    """File-based relay. Each chat completion request (messages plus tool schemas) is written to
+    <dir>/req-N.json; kdiag then waits for <dir>/resp-N.json holding an OpenAI-format assistant
+    message. A human, a script, or another agent answers. Everything else (tool allowlist,
+    step/token/spend caps, dry-run validation, approval prompts, audit) is unchanged."""
+    name = RELAY_NAME
+
+    def __init__(self, relay_dir: Optional[str] = None, timeout: float = 900.0, poll: float = 0.5, log=None):
+        self.dir = os.path.abspath(os.path.expanduser(relay_dir or default_relay_dir()))
+        os.makedirs(self.dir, exist_ok=True)
+        self.timeout, self.poll = timeout, poll
+        self.log = log or (lambda m: print(m, file=sys.stderr, flush=True))
+        existing = [int(m.group(1)) for f in os.listdir(self.dir) for m in [re.match(r"(?:req|resp)-(\d+)\.json$", f)] if m]
+        self.n = max(existing, default=0)
+
+    @staticmethod
+    def parse_response(obj: Any) -> Dict[str, Any]:
+        if isinstance(obj, dict) and "choices" in obj:
+            obj = (obj.get("choices") or [{}])[0].get("message")
+        elif isinstance(obj, dict) and isinstance(obj.get("message"), dict):
+            obj = obj["message"]
+        if not isinstance(obj, dict):
+            raise LLMError("relay response must be an assistant message object")
+        content, calls = obj.get("content"), obj.get("tool_calls") or []
+        if not content and not calls:
+            raise LLMError("relay response needs content and/or tool_calls")
+        if not isinstance(calls, list):
+            raise LLMError("tool_calls must be a list")
+        norm = []
+        for i, c in enumerate(calls):
+            fn = (c or {}).get("function") or {}
+            if not fn.get("name"):
+                raise LLMError(f"tool_calls[{i}] has no function.name")
+            args = fn.get("arguments", "{}")
+            if not isinstance(args, str):
+                args = json.dumps(args)
+            norm.append({"id": c.get("id") or f"relay-{i}", "type": "function", "function": {"name": fn["name"], "arguments": args}})
+        msg: Dict[str, Any] = {"role": "assistant", "content": content if isinstance(content, str) else None}
+        if norm:
+            msg["tool_calls"] = norm
+        return msg
+
+    def chat(self, messages: List[dict], tools: List[dict]) -> ChatResponse:
+        self.n += 1
+        n = self.n
+        req = os.path.join(self.dir, f"req-{n}.json")
+        resp = os.path.join(self.dir, f"resp-{n}.json")
+        payload = {"id": n, "provider": RELAY_NAME, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                   "respond_with": resp, "messages": messages, "tools": tools,
+                   "response_format": "an OpenAI assistant message: {\"role\": \"assistant\", \"content\": ..., \"tool_calls\": [...]}"}
+        tmp = req + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(tmp, req)
+        self.log(f"relay: wrote {req}; waiting up to {int(self.timeout)}s for {resp}")
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:
+            if os.path.exists(resp):
+                try:
+                    with open(resp) as f:
+                        obj = json.load(f)
+                except (OSError, ValueError):
+                    time.sleep(self.poll)  # partially written; try again
+                    continue
+                return ChatResponse(self.parse_response(obj), {})
+            time.sleep(self.poll)
+        raise LLMError(f"relay timed out after {int(self.timeout)}s waiting for {resp}")
+
+
 HINTS_RE = re.compile(r"<candidate_fixes>\s*(.*?)\s*</candidate_fixes>", re.S)
 
 
@@ -207,13 +285,15 @@ class HintFollowingMock(ChatClient):
             tool_call("finish", {"summary": "Mock provider: no candidate fix to propose."}, "mf")]}, usage)
 
 
-def make_client(mode: str, cfg: LLMConfig) -> Optional[ChatClient]:
-    """mode: auto | none | mock | live. auto uses the configured provider when its key env var is set.
+def make_client(mode: str, cfg: LLMConfig, relay_dir: Optional[str] = None, relay_timeout: float = 900.0) -> Optional[ChatClient]:
+    """mode: auto | none | mock | relay | live. auto uses the configured provider when its key env var is set.
     "openai", "xai" and "grok" are accepted as older aliases of "live"."""
     if mode == "none":
         return None
     if mode == "mock":
         return HintFollowingMock()
+    if mode == "relay":
+        return RelayClient(relay_dir, relay_timeout)
     if mode in ("live", "openai", "xai", "grok"):
         return OpenAICompatClient(cfg)
     if mode == "auto":

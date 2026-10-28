@@ -104,7 +104,7 @@ set it with `--llm-model` or `KDIAG_LLM_MODEL`, for example `KDIAG_LLM_MODEL=x-a
 
 | Setting | Flag | Environment | Default |
 |---|---|---|---|
-| Mode | `--llm auto\|none\|mock\|live` | | `auto` (provider if its key is set, otherwise rules only) |
+| Mode | `--llm auto\|none\|mock\|relay\|live` | | `auto` (provider if its key is set, otherwise rules only) |
 | Provider preset | `--llm-provider openrouter\|xai\|openai\|custom` | `KDIAG_LLM_PROVIDER` | `openrouter` |
 | Base URL | `--llm-base-url` | `KDIAG_LLM_BASE_URL` | from the preset (`https://openrouter.ai/api/v1`) |
 | Model | `--llm-model` | `KDIAG_LLM_MODEL` | from the preset (`x-ai/grok-4.7`) |
@@ -141,6 +141,37 @@ KDIAG_LLM_API_KEY=unused kdiag fix -n shop --llm-provider custom \
 `--llm mock` is a keyless stand-in that makes no LLM API calls. It runs the real agent loop (it calls read-only kubectl tools
 against your cluster) and then accepts the first deterministic candidate. It has no reasoning of its
 own; it exists to test the plumbing.
+
+### Relay mode (a human or another agent plays the model)
+
+`--llm relay` sends each chat completion request to files instead of an API. For request N kdiag
+writes `req-N.json` (the full `messages` list and the `tools` schemas, OpenAI format) to the relay
+directory and waits for `resp-N.json`. The response is one OpenAI-format assistant message, either bare
+or wrapped as `{"choices": [{"message": ...}]}`:
+
+```json
+{"role": "assistant", "content": "Checking events first.",
+ "tool_calls": [{"id": "c1", "type": "function",
+                 "function": {"name": "kubectl", "arguments": "{\"args\": [\"get\", \"events\"]}"}}]}
+```
+
+`arguments` may be a JSON string or an object. Write the file atomically (write a temp file, then
+rename) or kdiag will simply retry until it parses.
+
+| Setting | Flag | Environment | Default |
+|---|---|---|---|
+| Relay directory | `--relay-dir` | `KDIAG_RELAY_DIR`, else `$KDIAG_HOME/relay` | `~/.kdiag/relay` |
+| Wait per response (s) | `--relay-timeout` | | 900 |
+
+Numbering continues after any files already in the directory. Everything else is unchanged: the same
+read-only kubectl allowlist, step cap, server-side dry run of each proposal, the per-fix approval
+prompt, and the audit log. The audit log and scorecard label the provider
+`relay (human/agent answered, not Grok)` so a relay run is never mistaken for a Grok run.
+
+```bash
+kdiag fix -n shop --llm relay --relay-dir /tmp/kdiag-relay
+# in another shell: read /tmp/kdiag-relay/req-1.json, write /tmp/kdiag-relay/resp-1.json, and so on
+```
 
 ## Safety model
 

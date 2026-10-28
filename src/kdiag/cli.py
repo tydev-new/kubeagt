@@ -15,7 +15,7 @@ from .audit import AuditLog, default_session_dir
 from .bundle import Bundle, collect
 from .health import HEALTH_KINDS
 from .kube import KubectlError, KubeTarget, KubeWriter, ReadOnlyKubectl
-from .llm import DEFAULT_BASE_URL, DEFAULT_KEY_ENV, DEFAULT_MODEL, DEFAULT_PROVIDER, PRESETS, LLMConfig, LLMError, make_client
+from .llm import DEFAULT_BASE_URL, DEFAULT_KEY_ENV, DEFAULT_MODEL, DEFAULT_PROVIDER, PRESETS, RELAY_NAME, LLMConfig, LLMError, make_client
 from .rules import MIN_MEMORY_MIB, run_rules
 
 
@@ -28,10 +28,13 @@ def _common(p: argparse.ArgumentParser, ns: bool = True) -> None:
 
 def _llm_args(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("LLM provider (any OpenAI-compatible chat completions API; default OpenRouter)")
-    g.add_argument("--llm", default="auto", choices=["auto", "none", "mock", "live", "openai"],
+    g.add_argument("--llm", default="auto", choices=["auto", "none", "mock", "relay", "live", "openai"],
                    help="auto: use the provider if its API key env var is set, else rules only (default). "
                         "none: rules only. mock: keyless test provider, makes no LLM API calls. "
+                        "relay: write each request to the relay dir and wait for a human/agent-written response. "
                         "live: require the provider (openai is an alias).")
+    g.add_argument("--relay-dir", help="relay mode: directory for req-N.json / resp-N.json (default $KDIAG_RELAY_DIR or $KDIAG_HOME/relay)")
+    g.add_argument("--relay-timeout", type=float, default=900.0, help="relay mode: seconds to wait for each response (default 900)")
     g.add_argument("--llm-provider", choices=sorted(PRESETS),
                    help=f"preset for base URL, key env var, default model and prices "
                         f"(default $KDIAG_LLM_PROVIDER or {DEFAULT_PROVIDER}: {DEFAULT_BASE_URL}, key ${DEFAULT_KEY_ENV})")
@@ -156,7 +159,7 @@ def cmd_fix(a) -> int:
         return 2
     try:
         cfg = _cfg(a)
-        llm = make_client(a.llm, cfg)
+        llm = make_client(a.llm, cfg, a.relay_dir, a.relay_timeout)
     except LLMError as e:
         print(f"LLM setup failed: {e}", file=sys.stderr)
         return 2
@@ -165,6 +168,8 @@ def cmd_fix(a) -> int:
         print(f"LLM: off ({why}); using deterministic rules only.")
     elif a.llm == "mock":
         print(f"LLM: {llm.name} (offline, no LLM API calls)")
+    elif a.llm == "relay":
+        print(f"LLM: {llm.name}; relay dir {llm.dir}")
     else:
         print(f"LLM: {llm.name}")
     audit.write("session_start", namespace=a.namespace, context=kc.current_context(), llm=getattr(llm, "name", None),
@@ -201,8 +206,9 @@ def cmd_eval(a) -> int:
         print(f"LLM setup failed: {e}", file=sys.stderr)
         return 2
     opt = EvalOptions(os.path.expanduser(a.kubeconfig) if a.kubeconfig else None, a.context, a.llm, cfg, a.keep,
-                      a.verify_timeout, a.max_steps)
+                      a.verify_timeout, a.max_steps, a.relay_dir, a.relay_timeout)
     llm_desc = (a.llm if a.llm == "none" else f"{a.llm} (offline, no LLM API calls)" if a.llm == "mock"
+                else RELAY_NAME if a.llm == "relay"
                 else f"{a.llm} ({cfg.provider}, {cfg.model})") if a.llm != "auto" else ("auto (" + ("key set" if cfg.api_key() else "no key, rules only") + ")")
     print(f"kdiag eval: {len(scen)} scenario(s) on context {ctx}, LLM mode {llm_desc}")
     out = Path(a.out)

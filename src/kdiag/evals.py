@@ -109,6 +109,8 @@ class EvalOptions:
     keep: bool = False
     verify_timeout: int = 120
     max_steps: int = 12
+    relay_dir: Optional[str] = None
+    relay_timeout: float = 900.0
 
 
 def run_scenario(sdir: Path, opt: EvalOptions, out_dir: Path, log: Callable[[str], None]) -> Dict[str, Any]:
@@ -143,7 +145,7 @@ def run_scenario(sdir: Path, opt: EvalOptions, out_dir: Path, log: Callable[[str
     def out(s: str) -> None:
         transcript.append(s)
 
-    llm = make_client(opt.llm_mode, opt.llm_cfg or LLMConfig.from_env())
+    llm = make_client(opt.llm_mode, opt.llm_cfg or LLMConfig.from_env(), opt.relay_dir, opt.relay_timeout)
     sess = FixSession(ns, kc.current_context(), lambda: collect(kc), writer, kc, audit, llm=llm, llm_cfg=opt.llm_cfg,
                       budget=Budget(max_steps=opt.max_steps), yes=True, out=out, verify_timeout=opt.verify_timeout,
                       health_snapshot=lambda: collect(kc, kinds=HEALTH_KINDS, with_logs=False, with_secrets=False))
