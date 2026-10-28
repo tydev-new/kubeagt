@@ -1,0 +1,10 @@
+description: Redis container command overridden with a typo (redis-srv). The runtime cannot find it and the pod crash-loops.
+steps:
+  - {apply: manifest.yaml}
+settle_seconds: 25
+expected_findings: [crash-loop]
+expected_fixes:
+  - target: Deployment/redis
+    checks:
+      - {path: "spec.template.spec.containers[0].command", absent: true}
+expect_healthy: true

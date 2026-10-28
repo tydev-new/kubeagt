@@ -1,0 +1,9 @@
+description: >-
+  Container references ConfigMap api-config, which does not exist. kdiag must detect it but must NOT
+  invent a fix: it never creates ConfigMaps or Secrets. Expected to stay unhealthy until a human acts.
+steps:
+  - {apply: manifest.yaml}
+settle_seconds: 15
+expected_findings: [container-config-error]
+expected_fixes: []
+expect_healthy: false

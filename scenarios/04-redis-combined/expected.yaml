@@ -1,0 +1,16 @@
+description: >-
+  The interview case. Three bugs on one Redis Deployment: nodeSelector redisnode=true (no such node),
+  readiness probe on 5432 while Redis listens on 6379, and a 5Mi memory request and limit.
+  Expected fixes: remove the selector, probe 6379, memory 128Mi request and 512Mi limit.
+steps:
+  - {apply: manifest.yaml}
+settle_seconds: 15
+expected_findings: [nodeselector-no-match, probe-port-mismatch, memory-too-small]
+expected_fixes:
+  - target: Deployment/redis
+    checks:
+      - {path: spec.template.spec.nodeSelector, absent: true}
+      - {path: "spec.template.spec.containers[0].readinessProbe.tcpSocket.port", equals: 6379}
+      - {path: "spec.template.spec.containers[0].resources.requests.memory", equals: 128Mi}
+      - {path: "spec.template.spec.containers[0].resources.limits.memory", equals: 512Mi}
+expect_healthy: true

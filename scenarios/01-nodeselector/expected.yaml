@@ -1,0 +1,10 @@
+description: Worker pinned to nodeSelector disktype=ssd, which no node has. Pod stays Pending.
+steps:
+  - {apply: manifest.yaml}
+settle_seconds: 15
+expected_findings: [nodeselector-no-match]
+expected_fixes:
+  - target: Deployment/worker
+    checks:
+      - {path: spec.template.spec.nodeSelector, absent: true}
+expect_healthy: true

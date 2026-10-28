@@ -1,0 +1,11 @@
+description: A working Deployment is updated to an image tag that does not exist. The new pod is stuck in ImagePullBackOff.
+steps:
+  - {apply: manifest.yaml, wait_ready: true}
+  - {apply: update.yaml}
+settle_seconds: 25
+expected_findings: [image-pull-failure]
+expected_fixes:
+  - target: Deployment/web
+    checks:
+      - {path: "spec.template.spec.containers[0].image", equals: "busybox:1.36"}
+expect_healthy: true

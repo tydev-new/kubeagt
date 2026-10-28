@@ -1,0 +1,7 @@
+description: Healthy Redis Deployment and Service. kdiag should find nothing and change nothing.
+steps:
+  - {apply: manifest.yaml, wait_ready: true}
+settle_seconds: 5
+expected_findings: []
+expected_fixes: []
+expect_healthy: true

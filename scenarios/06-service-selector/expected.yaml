@@ -1,0 +1,10 @@
+description: Service selects app=redis-cache but the pods are labeled app=redis. The Service has no endpoints.
+steps:
+  - {apply: manifest.yaml, wait_ready: true}
+settle_seconds: 5
+expected_findings: [service-no-matching-pods]
+expected_fixes:
+  - target: Service/redis
+    checks:
+      - {path: spec.selector, equals: {app: redis}}
+expect_healthy: true

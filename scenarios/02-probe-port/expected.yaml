@@ -1,0 +1,10 @@
+description: Redis readiness probe checks 5432 (the Postgres port) while Redis listens on 6379. Pod never Ready.
+steps:
+  - {apply: manifest.yaml}
+settle_seconds: 20
+expected_findings: [probe-port-mismatch]
+expected_fixes:
+  - target: Deployment/redis
+    checks:
+      - {path: "spec.template.spec.containers[0].readinessProbe.tcpSocket.port", equals: 6379}
+expect_healthy: true
