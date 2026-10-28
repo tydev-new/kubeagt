@@ -244,3 +244,20 @@ def test_budget_prefers_reported_cost():
     b = Budget(max_cost_usd=0.01)
     b.add({"prompt_tokens": 10, "completion_tokens": 10, "cost": 0.02}, LLMConfig())
     assert b.cost_usd == pytest.approx(0.02) and "spend cap" in (b.exhausted() or "")
+
+
+def test_proposal_change_line_uses_change_field_or_first_sentence():
+    with_change = dict(FIX, change="set readinessProbe port to 6379")
+    res = Investigator(ScriptedLLM([msg(tool_call("propose_fix", with_change, "1"))]), FakeKC()).investigate("ns")
+    assert res.proposal.fix.summary == "set readinessProbe port to 6379"
+    long_diag = dict(FIX, diagnosis="The probe checks 5432. Redis listens on 6379 so readiness never passes.")
+    res = Investigator(ScriptedLLM([msg(tool_call("propose_fix", long_diag, "1"))]), FakeKC()).investigate("ns")
+    assert res.proposal.fix.summary == "The probe checks 5432"
+
+
+def test_hint_mock_passes_rule_summary_as_change():
+    hints = [{"rule": "probe-port-mismatch", "kind": "Deployment", "name": "redis", "patch_type": "json", "patch": FIX["patch"],
+              "summary": "set redis readinessProbe port to 6379"}]
+    task = "ns\n<candidate_fixes>\n" + json.dumps(hints) + "\n</candidate_fixes>"
+    res = Investigator(HintFollowingMock(), FakeKC()).investigate(task)
+    assert res.proposal.fix.summary == "set redis readinessProbe port to 6379"

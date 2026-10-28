@@ -49,6 +49,7 @@ TOOLS = [
             "kind": {"type": "string"}, "name": {"type": "string"},
             "patch_type": {"type": "string", "enum": ["json", "merge", "strategic"]},
             "patch": {"description": "JSON patch array, or merge/strategic patch object"},
+            "change": {"type": "string", "description": "one short line describing the change, e.g. 'set readinessProbe port to 6379'"},
             "diagnosis": {"type": "string"},
             "evidence": {"type": "array", "items": {"type": "string"}},
             "reasoning": {"type": "string"},
@@ -209,7 +210,13 @@ class Investigator:
             return None, str(e)
         kind = {"deployment": "Deployment", "statefulset": "StatefulSet", "daemonset": "DaemonSet", "service": "Service",
                 "configmap": "ConfigMap", "persistentvolumeclaim": "PersistentVolumeClaim"}[k]
-        fix = Fix(kind, n, pt, patch, summary=str(a.get("diagnosis", ""))[:120], source="llm", confidence="medium")
+        change = str(a.get("change") or "").strip()
+        if not change:
+            diag = str(a.get("diagnosis", "")).strip()
+            change = diag.split(". ")[0].rstrip(".")
+        if len(change) > 100:
+            change = change[:97].rstrip() + "..."
+        fix = Fix(kind, n, pt, patch, summary=change, source="llm", confidence="medium")
         if self.validate:
             err = self.validate(fix)
             if err:

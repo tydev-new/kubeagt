@@ -199,6 +199,7 @@ class HintFollowingMock(ChatClient):
             h = hints[idx]
             return ChatResponse({"role": "assistant", "content": None, "tool_calls": [tool_call("propose_fix", {
                 "kind": h["kind"], "name": h["name"], "patch_type": h["patch_type"], "patch": h["patch"],
+                "change": h.get("summary", ""),
                 "diagnosis": h.get("diagnosis", ""), "evidence": h.get("evidence", []),
                 "reasoning": "Mock provider: accepting deterministic candidate " + h.get("rule", ""),
                 "rule": h.get("rule")}, f"m{3 + idx}")]}, usage)
