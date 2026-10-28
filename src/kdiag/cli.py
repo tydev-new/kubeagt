@@ -30,7 +30,7 @@ def _llm_args(p: argparse.ArgumentParser) -> None:
     g = p.add_argument_group("LLM provider (any OpenAI-compatible chat completions API; default OpenRouter)")
     g.add_argument("--llm", default="auto", choices=["auto", "none", "mock", "live", "openai"],
                    help="auto: use the provider if its API key env var is set, else rules only (default). "
-                        "none: rules only. mock: keyless offline test provider, no network. "
+                        "none: rules only. mock: keyless test provider, makes no LLM API calls. "
                         "live: require the provider (openai is an alias).")
     g.add_argument("--llm-provider", choices=sorted(PRESETS),
                    help=f"preset for base URL, key env var, default model and prices "
@@ -164,7 +164,7 @@ def cmd_fix(a) -> int:
         why = "disabled" if a.llm == "none" else f"{cfg.api_key_env} not set"
         print(f"LLM: off ({why}); using deterministic rules only.")
     elif a.llm == "mock":
-        print(f"LLM: {llm.name} (offline, no API calls)")
+        print(f"LLM: {llm.name} (offline, no LLM API calls)")
     else:
         print(f"LLM: {llm.name}")
     audit.write("session_start", namespace=a.namespace, context=kc.current_context(), llm=getattr(llm, "name", None),
@@ -202,7 +202,7 @@ def cmd_eval(a) -> int:
         return 2
     opt = EvalOptions(os.path.expanduser(a.kubeconfig) if a.kubeconfig else None, a.context, a.llm, cfg, a.keep,
                       a.verify_timeout, a.max_steps)
-    llm_desc = (a.llm if a.llm == "none" else f"{a.llm} (offline, no API calls)" if a.llm == "mock"
+    llm_desc = (a.llm if a.llm == "none" else f"{a.llm} (offline, no LLM API calls)" if a.llm == "mock"
                 else f"{a.llm} ({cfg.provider}, {cfg.model})") if a.llm != "auto" else ("auto (" + ("key set" if cfg.api_key() else "no key, rules only") + ")")
     print(f"kdiag eval: {len(scen)} scenario(s) on context {ctx}, LLM mode {llm_desc}")
     out = Path(a.out)

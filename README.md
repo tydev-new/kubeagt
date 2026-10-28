@@ -138,7 +138,7 @@ KDIAG_LLM_API_KEY=unused kdiag fix -n shop --llm-provider custom \
   --llm-base-url http://localhost:11434/v1 --llm-model <model>
 ```
 
-`--llm mock` is a keyless, offline stand-in (no API calls) that runs the real agent loop (it calls read-only kubectl tools
+`--llm mock` is a keyless stand-in that makes no LLM API calls. It runs the real agent loop (it calls read-only kubectl tools
 against your cluster) and then accepts the first deterministic candidate. It has no reasoning of its
 own; it exists to test the plumbing.
 
