@@ -190,7 +190,8 @@ kubeagt fix -n shop --llm relay --relay-dir /tmp/kubeagt-relay
 4. **Redaction everywhere.** Secret values are never read (only names and key names). Sensitive env
    values, token-like strings, bearer headers, private keys, and JWTs are masked in bundles, LLM tool
    output, and the audit log. `last-applied-configuration` annotations are dropped.
-5. **Caps.** Turn, token, and estimated spend caps bound every LLM session.
+5. **Caps.** Turn, token, and estimated spend caps bound every LLM session. `--max-fixes` (default 10)
+   caps applied fixes; a separate guard stops after 3x that many proposals (at least 10).
 6. **Audit log.** Every kubectl command (read, dry run, write, verify), every LLM call, every decision,
    and every result is one JSON line in the session's `audit.jsonl`.
 7. **Evals are fenced.** `kubeagt eval` refuses to run unless you pass `--context` or `--kubeconfig`
