@@ -20,6 +20,8 @@ Found 3 problem(s) and 3 related symptom(s):
 Apply this fix? [y]es / [n]o / [s]kip / [q]uit:
 ```
 
+Roadmap and known limitations: see [ROADMAP.md](ROADMAP.md).
+
 ## Install
 
 Python 3.9 or newer and `kubectl` on your PATH.
