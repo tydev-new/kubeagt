@@ -24,7 +24,7 @@ class AuditLog:
 
 
 def default_session_dir() -> Path:
-    base = Path(os.environ.get("KDIAG_HOME", Path.home() / ".kdiag")) / "sessions"
+    base = Path(os.environ.get("KUBEAGT_HOME", Path.home() / ".kubeagt")) / "sessions"
     d = base / time.strftime("%Y%m%d-%H%M%S")
     d.mkdir(parents=True, exist_ok=True)
     return d

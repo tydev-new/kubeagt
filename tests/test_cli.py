@@ -2,8 +2,8 @@ import json
 
 from helpers import bundle, node, pod_for, redis_deployment, service
 
-from kdiag.cli import main
-from kdiag.evals import check_expectation, default_scenarios_dir, get_path, list_scenarios
+from kubeagt.cli import main
+from kubeagt.evals import check_expectation, default_scenarios_dir, get_path, list_scenarios
 
 
 def test_check_offline_bundle(tmp_path, capsys):
@@ -50,7 +50,7 @@ def test_fix_help_documents_openrouter_default(capsys):
 
 
 def test_cli_provider_flag_builds_config():
-    from kdiag.cli import _cfg, build_parser
+    from kubeagt.cli import _cfg, build_parser
     a = build_parser().parse_args(["fix", "--llm-provider", "xai", "--llm-model", "grok-x"])
     cfg = _cfg(a)
     assert (cfg.provider, cfg.base_url, cfg.api_key_env, cfg.model) == ("xai", "https://api.x.ai/v1", "XAI_API_KEY", "grok-x")

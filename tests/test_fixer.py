@@ -2,9 +2,9 @@ import json
 
 from helpers import FakeCluster, node, redis_deployment, service
 
-from kdiag.audit import AuditLog
-from kdiag.fixer import FixSession
-from kdiag.llm import HintFollowingMock, ScriptedLLM, tool_call
+from kubeagt.audit import AuditLog
+from kubeagt.fixer import FixSession
+from kubeagt.llm import HintFollowingMock, ScriptedLLM, tool_call
 
 
 class KC:
@@ -12,7 +12,7 @@ class KC:
         self.ran = []
 
     def run(self, argv, path="read"):
-        from kdiag.kube import validate_read_argv
+        from kubeagt.kube import validate_read_argv
         validate_read_argv(argv)
         self.ran.append(argv)
         return "ok"

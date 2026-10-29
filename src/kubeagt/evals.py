@@ -1,7 +1,7 @@
 """Scenario evals on a real cluster (kind recommended).
 
 The harness below creates namespaces and applies broken manifests. That is test setup,
-not part of the diagnosis path: kdiag's own writes still go only through KubeWriter.
+not part of the diagnosis path: kubeagt's own writes still go only through KubeWriter.
 """
 from __future__ import annotations
 
@@ -24,12 +24,12 @@ from .kube import KubeTarget, KubeWriter, ReadOnlyKubectl
 from .llm import LLMConfig, make_client
 from .rules import run_rules
 
-NS_PREFIX = "kdiag-eval-"
+NS_PREFIX = "kubeagt-eval-"
 
 
 def default_scenarios_dir() -> Path:
     try:
-        from . import scenarios as pkg  # installed wheel: kdiag/scenarios
+        from . import scenarios as pkg  # installed wheel: kubeagt/scenarios
         return Path(pkg.__file__).parent
     except ImportError:
         return Path(__file__).resolve().parents[2] / "scenarios"
@@ -52,7 +52,7 @@ class Harness:
         return cp
 
     def reset_namespace(self, ns: str) -> None:
-        assert ns.startswith(NS_PREFIX), "eval harness only manages kdiag-eval-* namespaces"
+        assert ns.startswith(NS_PREFIX), "eval harness only manages kubeagt-eval-* namespaces"
         if self._k(["get", "namespace", ns], check=False).returncode == 0:
             self._k(["delete", "namespace", ns, "--wait=true", "--timeout=120s"], timeout=150, check=False)
         self._k(["create", "namespace", ns])
@@ -189,9 +189,9 @@ def write_scorecard(results: List[Dict[str, Any]], out_dir: Path, meta: Dict[str
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "scorecard.json").write_text(json.dumps({"meta": meta, "results": results}, indent=1))
     yn = lambda b: "yes" if b else "NO"
-    lines = ["# kdiag eval scorecard", "",
+    lines = ["# kubeagt eval scorecard", "",
              f"- date: {meta.get('date')}", f"- context: {meta.get('context')}", f"- LLM mode: {meta.get('llm')}",
-             f"- kdiag version: {meta.get('version')}", "",
+             f"- kubeagt version: {meta.get('version')}", "",
              "| Scenario | Detected (expected) | Detection | Correct fix | Healthy after (expected) | Fixes applied | Steps | Time (s) | Result |",
              "|---|---|---|---|---|---|---|---|---|"]
     for r in results:

@@ -20,7 +20,7 @@ from .redact import redact_text
 # Provider presets. Every field can still be overridden by env vars or CLI flags, so any
 # other OpenAI-compatible endpoint (vLLM, Ollama, LiteLLM, Azure, ...) works via "custom".
 # Model slugs change; check the provider's current model list (for OpenRouter:
-# https://openrouter.ai/models?q=grok) and override with --llm-model / KDIAG_LLM_MODEL.
+# https://openrouter.ai/models?q=grok) and override with --llm-model / KUBEAGT_LLM_MODEL.
 PRESETS: Dict[str, Dict[str, Any]] = {
     "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "x-ai/grok-4.7",
                    "api_key_env": "OPENROUTER_API_KEY", "price_in_per_mtok": 2.0, "price_out_per_mtok": 6.0},
@@ -28,7 +28,7 @@ PRESETS: Dict[str, Dict[str, Any]] = {
             "api_key_env": "XAI_API_KEY", "price_in_per_mtok": 2.0, "price_out_per_mtok": 6.0},
     "openai": {"base_url": "https://api.openai.com/v1", "model": "",
                "api_key_env": "OPENAI_API_KEY", "price_in_per_mtok": 2.0, "price_out_per_mtok": 10.0},
-    "custom": {"base_url": "", "model": "", "api_key_env": "KDIAG_LLM_API_KEY",
+    "custom": {"base_url": "", "model": "", "api_key_env": "KUBEAGT_LLM_API_KEY",
                "price_in_per_mtok": 2.0, "price_out_per_mtok": 6.0},
 }
 DEFAULT_PROVIDER = "openrouter"
@@ -55,19 +55,19 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, **overrides: Any) -> "LLMConfig":
-        """Precedence: CLI overrides, then KDIAG_LLM_* env vars, then the provider preset."""
+        """Precedence: CLI overrides, then KUBEAGT_LLM_* env vars, then the provider preset."""
         env = os.environ
-        provider = overrides.pop("provider", None) or env.get("KDIAG_LLM_PROVIDER") or DEFAULT_PROVIDER
+        provider = overrides.pop("provider", None) or env.get("KUBEAGT_LLM_PROVIDER") or DEFAULT_PROVIDER
         if provider not in PRESETS:
             raise LLMError(f"unknown LLM provider {provider!r}; choose one of {', '.join(PRESETS)}")
         p = PRESETS[provider]
         cfg = cls(
             provider=provider,
-            base_url=env.get("KDIAG_LLM_BASE_URL") or p["base_url"],
-            model=env.get("KDIAG_LLM_MODEL") or p["model"],
-            api_key_env=env.get("KDIAG_LLM_API_KEY_ENV") or p["api_key_env"],
-            price_in_per_mtok=float(env.get("KDIAG_PRICE_IN_PER_MTOK") or p["price_in_per_mtok"]),
-            price_out_per_mtok=float(env.get("KDIAG_PRICE_OUT_PER_MTOK") or p["price_out_per_mtok"]),
+            base_url=env.get("KUBEAGT_LLM_BASE_URL") or p["base_url"],
+            model=env.get("KUBEAGT_LLM_MODEL") or p["model"],
+            api_key_env=env.get("KUBEAGT_LLM_API_KEY_ENV") or p["api_key_env"],
+            price_in_per_mtok=float(env.get("KUBEAGT_PRICE_IN_PER_MTOK") or p["price_in_per_mtok"]),
+            price_out_per_mtok=float(env.get("KUBEAGT_PRICE_OUT_PER_MTOK") or p["price_out_per_mtok"]),
         )
         for k, v in overrides.items():
             if v is not None:
@@ -76,9 +76,9 @@ class LLMConfig:
 
     def validate(self) -> None:
         if not self.base_url:
-            raise LLMError(f"provider {self.provider!r} needs a base URL: set --llm-base-url or KDIAG_LLM_BASE_URL")
+            raise LLMError(f"provider {self.provider!r} needs a base URL: set --llm-base-url or KUBEAGT_LLM_BASE_URL")
         if not self.model:
-            raise LLMError(f"provider {self.provider!r} needs a model: set --llm-model or KDIAG_LLM_MODEL")
+            raise LLMError(f"provider {self.provider!r} needs a model: set --llm-model or KUBEAGT_LLM_MODEL")
 
     def api_key(self) -> Optional[str]:
         v = os.environ.get(self.api_key_env, "").strip()
@@ -113,7 +113,7 @@ class OpenAICompatClient(ChatClient):
     def _extra_headers(self) -> Dict[str, str]:
         # Optional OpenRouter attribution headers; harmless elsewhere but only sent to OpenRouter.
         if "openrouter.ai" in self.cfg.base_url:
-            return {"HTTP-Referer": "https://github.com/tydev-new/kdiag", "X-Title": "kdiag"}
+            return {"HTTP-Referer": "https://github.com/tydev-new/kubeagt", "X-Title": "kubeagt"}
         return {}
 
     def chat(self, messages: List[dict], tools: List[dict]) -> ChatResponse:
@@ -127,7 +127,7 @@ class OpenAICompatClient(ChatClient):
         for attempt in range(self.retries + 1):
             req = urllib.request.Request(url, data=data, method="POST", headers={
                 "Content-Type": "application/json", "Authorization": f"Bearer {self.key}",
-                "User-Agent": "kdiag/0.1", **self._extra_headers()})
+                "User-Agent": "kubeagt/0.1", **self._extra_headers()})
             try:
                 with urllib.request.urlopen(req, timeout=self.cfg.timeout) as r:
                     payload = json.loads(r.read().decode("utf-8"))
@@ -177,13 +177,13 @@ RELAY_NAME = "relay (human/agent answered, not Grok)"
 
 
 def default_relay_dir() -> str:
-    return os.environ.get("KDIAG_RELAY_DIR") or os.path.join(
-        os.environ.get("KDIAG_HOME") or os.path.join(os.path.expanduser("~"), ".kdiag"), "relay")
+    return os.environ.get("KUBEAGT_RELAY_DIR") or os.path.join(
+        os.environ.get("KUBEAGT_HOME") or os.path.join(os.path.expanduser("~"), ".kubeagt"), "relay")
 
 
 class RelayClient(ChatClient):
     """File-based relay. Each chat completion request (messages plus tool schemas) is written to
-    <dir>/req-N.json; kdiag then waits for <dir>/resp-N.json holding an OpenAI-format assistant
+    <dir>/req-N.json; kubeagt then waits for <dir>/resp-N.json holding an OpenAI-format assistant
     message. A human, a script, or another agent answers. Everything else (tool allowlist,
     step/token/spend caps, dry-run validation, approval prompts, audit) is unchanged."""
     name = RELAY_NAME

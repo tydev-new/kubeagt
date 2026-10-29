@@ -2,7 +2,7 @@
 
 The model gets exactly three tools:
   kubectl      read-only, allowlisted, namespace-scoped (ReadOnlyKubectl)
-  propose_fix  returns a proposal to kdiag; it does NOT apply anything
+  propose_fix  returns a proposal to kubeagt; it does NOT apply anything
   finish       ends the investigation without a fix
 There is no tool that writes to the cluster. Applying a fix is done by the fixer through
 KubeWriter, and only after a human says yes.
@@ -20,7 +20,7 @@ from .kube import KubeWriter, ToolRefused
 from .llm import ChatClient, LLMConfig, LLMError
 from .redact import redact_text
 
-SYSTEM_PROMPT = """You are kdiag, a careful Kubernetes troubleshooting assistant.
+SYSTEM_PROMPT = """You are kubeagt, a careful Kubernetes troubleshooting assistant.
 You investigate ONE namespace using read-only kubectl commands, then propose exactly ONE fix.
 
 Rules:

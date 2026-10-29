@@ -2,10 +2,10 @@
 import pytest
 from helpers import bundle, node, redis_deployment, service
 
-from kdiag.bundle import Bundle
-from kdiag.patching import PatchError, apply_json_patch, apply_merge_patch, spec_diff
-from kdiag.quantity import mib, parse_quantity
-from kdiag.redact import redact_obj, redact_text
+from kubeagt.bundle import Bundle
+from kubeagt.patching import PatchError, apply_json_patch, apply_merge_patch, spec_diff
+from kubeagt.quantity import mib, parse_quantity
+from kubeagt.redact import redact_obj, redact_text
 
 
 def test_quantities():

@@ -1,5 +1,5 @@
-LLM: relay (human/agent answered, not Grok); relay dir /tmp/kdiag-relay
-kdiag: namespace kdiag-relay-demo, context kind-kdiag-test
+LLM: relay (human/agent answered, not Grok); relay dir /tmp/kubeagt-relay
+kubeagt: namespace kubeagt-relay-demo, context kind-kdiag-test
 Found 3 problem(s) and 3 related symptom(s):
   [critical] Deployment/redis: nodeSelector redisnode=true matches no node
   [warning] Deployment/redis container redis: memory limit 5Mi is far too small
@@ -9,17 +9,17 @@ Found 3 problem(s) and 3 related symptom(s):
   [symptom] Deployment/redis: 0/1 replicas ready
 
 Investigating with LLM (relay (human/agent answered, not Grok)), read-only tools only...
-relay: wrote /tmp/kdiag-relay/req-1.json; waiting up to 900s for /tmp/kdiag-relay/resp-1.json
+relay: wrote /tmp/kubeagt-relay/req-1.json; waiting up to 900s for /tmp/kubeagt-relay/resp-1.json
   [llm] kubectl describe pod -l app=redis
   [llm] kubectl get nodes --show-labels
-relay: wrote /tmp/kdiag-relay/req-2.json; waiting up to 900s for /tmp/kdiag-relay/resp-2.json
+relay: wrote /tmp/kubeagt-relay/req-2.json; waiting up to 900s for /tmp/kubeagt-relay/resp-2.json
   [llm] kubectl get nodes -o jsonpath={range .items[*]}{.metadata.name}{' taints='}{.spec.taints}{'\n'}{end}
   [llm] kubectl get deployment redis -o jsonpath={.spec.template.spec.nodeSelector}{' affinity='}{.spec.template.spec.affinity}
-relay: wrote /tmp/kdiag-relay/req-3.json; waiting up to 900s for /tmp/kdiag-relay/resp-3.json
+relay: wrote /tmp/kubeagt-relay/req-3.json; waiting up to 900s for /tmp/kubeagt-relay/resp-3.json
 
 ==============================================================================
 Proposed fix 1   source: LLM (relay (human/agent answered, not Grok)), addresses rule nodeselector-no-match   confidence: medium
-Target:    Deployment/redis   namespace: kdiag-relay-demo   context: kind-kdiag-test
+Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kdiag-test
 Problem:   nodeSelector redisnode=true matches no node
 Diagnosis: The redis pod has been Pending since creation because its nodeSelector redisnode=true
            matches no node. The cluster has a single node (kdiag-test-control-plane), it does not
@@ -40,27 +40,27 @@ Change:    remove nodeSelector redisnode=true so the pod can schedule on the onl
     -        redisnode: 'true'
            restartPolicy: Always
            schedulerName: default-scheduler
-Why:       Removing the selector is the smallest change kdiag can make within the namespace and lets
+Why:       Removing the selector is the smallest change kubeagt can make within the namespace and lets
            the pod schedule on the untainted node. Labeling the node instead would also work but is
            a cluster-level change outside the allowed patch kinds; a human can do that later if
            Redis really should be pinned. The 5Mi memory limit and the readiness probe on 5432 still
            need separate fixes once the pod is running.
-Command:   kubectl patch deployment redis -n kdiag-relay-demo --type json -p '[{"op": "remove", "path": "/spec/template/spec/nodeSelector"}]'
+Command:   kubectl patch deployment redis -n kubeagt-relay-demo --type json -p '[{"op": "remove", "path": "/spec/template/spec/nodeSelector"}]'
 ==============================================================================
 Apply this fix? [y]es / [n]o / [s]kip / [q]uit:   applied: deployment.apps/redis patched
   verifying: waiting up to 15s for rollout of Deployment/redis...
   spec issue resolved; rollout is still blocked by other issue(s): memory-too-small, probe-port-mismatch
 
 Investigating with LLM (relay (human/agent answered, not Grok)), read-only tools only...
-relay: wrote /tmp/kdiag-relay/req-4.json; waiting up to 900s for /tmp/kdiag-relay/resp-4.json
+relay: wrote /tmp/kubeagt-relay/req-4.json; waiting up to 900s for /tmp/kubeagt-relay/resp-4.json
   [llm] kubectl get pods -l app=redis -o wide
   [llm] kubectl get events --sort-by .lastTimestamp
   [llm] kubectl logs deployment/redis --tail 20
-relay: wrote /tmp/kdiag-relay/req-5.json; waiting up to 900s for /tmp/kdiag-relay/resp-5.json
+relay: wrote /tmp/kubeagt-relay/req-5.json; waiting up to 900s for /tmp/kubeagt-relay/resp-5.json
 
 ==============================================================================
 Proposed fix 2   source: LLM (relay (human/agent answered, not Grok)), addresses rule probe-port-mismatch   confidence: medium
-Target:    Deployment/redis   namespace: kdiag-relay-demo   context: kind-kdiag-test
+Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kdiag-test
 Problem:   readinessProbe checks port 5432 but the container listens on 6379
 Diagnosis: After the scheduling fix the new pod redis-79c848ccd5-q7qzf is Running but never Ready:
            its readiness probe connects to TCP 5432, where nothing listens. Redis itself started
@@ -82,21 +82,21 @@ Change:    point the redis readinessProbe at 6379, the port Redis actually liste
 Why:       Changing only the probe port is the smallest fix and matches the port Redis reports in
            its own log and the declared containerPort. The 5Mi memory limit has not caused an OOM
            kill yet (0 restarts) but is still unsafe; it should be the next, separate fix.
-Command:   kubectl patch deployment redis -n kdiag-relay-demo --type json -p '[{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/tcpSocket/port", "value": 6379}]'
+Command:   kubectl patch deployment redis -n kubeagt-relay-demo --type json -p '[{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/tcpSocket/port", "value": 6379}]'
 ==============================================================================
 Apply this fix? [y]es / [n]o / [s]kip / [q]uit:   applied: deployment.apps/redis patched
   verifying: waiting up to 15s for rollout of Deployment/redis...
   verified: rollout complete; 1 other issue(s) remain
 
 Investigating with LLM (relay (human/agent answered, not Grok)), read-only tools only...
-relay: wrote /tmp/kdiag-relay/req-6.json; waiting up to 900s for /tmp/kdiag-relay/resp-6.json
+relay: wrote /tmp/kubeagt-relay/req-6.json; waiting up to 900s for /tmp/kubeagt-relay/resp-6.json
   [llm] kubectl get pods -l app=redis -o jsonpath={range .items[*]}{.metadata.name}{' ready='}{.status.containerStatuses[0].ready}{' restarts='}{.status.containerStatuses[0].restartCount}{' lastState='}{.status.containerStatuses[0].lastState}{'\n'}{end}
   [llm] kubectl top pod -l app=redis
-relay: wrote /tmp/kdiag-relay/req-7.json; waiting up to 900s for /tmp/kdiag-relay/resp-7.json
+relay: wrote /tmp/kubeagt-relay/req-7.json; waiting up to 900s for /tmp/kubeagt-relay/resp-7.json
 
 ==============================================================================
 Proposed fix 3   source: LLM (relay (human/agent answered, not Grok)), addresses rule memory-too-small   confidence: medium
-Target:    Deployment/redis   namespace: kdiag-relay-demo   context: kind-kdiag-test
+Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kdiag-test
 Problem:   memory limit 5Mi is far too small
 Diagnosis: Redis is Ready now, but its memory request and limit are both 5Mi. It survives only
            because it is idle: it has not been OOM-killed yet (restarts=0), but it runs with the
@@ -124,7 +124,7 @@ Why:       Without usage data I picked a conservative size for a small single Re
            so the scheduler reserves real headroom, and a 256Mi limit as a ceiling since Redis has
            no maxmemory of its own here. This is a smaller bump than the rule's 128Mi/512Mi
            candidate; adjust once real usage is known, or set maxmemory in a Redis config.
-Command:   kubectl patch deployment redis -n kdiag-relay-demo --type json -p '[{"op": "replace", "path": "/spec/template/spec/containers/0/resources/requests/memory", "value": "64Mi"}, {"op": "replace", "path": "/spec/template/spec/containers/0/resources/limits/memory", "value": "256Mi"}]'
+Command:   kubectl patch deployment redis -n kubeagt-relay-demo --type json -p '[{"op": "replace", "path": "/spec/template/spec/containers/0/resources/requests/memory", "value": "64Mi"}, {"op": "replace", "path": "/spec/template/spec/containers/0/resources/limits/memory", "value": "256Mi"}]'
 ==============================================================================
 Apply this fix? [y]es / [n]o / [s]kip / [q]uit:   applied: deployment.apps/redis patched
   verifying: waiting up to 15s for rollout of Deployment/redis...
@@ -139,7 +139,7 @@ Summary
   namespace healthy: yes
   LLM: 7 call(s), 0 tokens, est. $0.0000, 9 read-only tool call(s)
 
-Audit log: /tmp/kdiag-relay-home/sessions/20261028-165553/audit.jsonl
+Audit log: /tmp/kubeagt-relay-home/sessions/20261028-165553/audit.jsonl
 EXIT 0
 
 ==============================================================================
@@ -254,7 +254,7 @@ Files: /workspace/relay-run/relay/req-N.json and resp-N.json; audit: /workspace/
       "get nodes --show-labels: kdiag-test-control-plane has no redisnode label",
       "node taints: none; Deployment has no affinity, only nodeSelector {\"redisnode\":\"true\"}"
      ],
-     "reasoning": "Removing the selector is the smallest change kdiag can make within the namespace and lets the pod schedule on the untainted node. Labeling the node instead would also work but is a cluster-level change outside the allowed patch kinds; a human can do that later if Redis really should be pinned. The 5Mi memory limit and the readiness probe on 5432 still need separate fixes once the pod is running.",
+     "reasoning": "Removing the selector is the smallest change kubeagt can make within the namespace and lets the pod schedule on the untainted node. Labeling the node instead would also work but is a cluster-level change outside the allowed patch kinds; a human can do that later if Redis really should be pinned. The 5Mi memory limit and the readiness probe on 5432 still need separate fixes once the pod is running.",
      "rule": "nodeselector-no-match"
     }
    }

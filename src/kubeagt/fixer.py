@@ -282,7 +282,7 @@ class FixSession:
     def _print_findings(self, findings: List[Finding]) -> None:
         roots = [f for f in findings if f.root_cause]
         sym = [f for f in findings if not f.root_cause]
-        self.out(f"kdiag: namespace {self.ns}, context {self.context}")
+        self.out(f"kubeagt: namespace {self.ns}, context {self.context}")
         if not findings:
             self.out("No problems found.")
             return

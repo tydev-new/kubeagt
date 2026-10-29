@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kdiag"
+name = "kubeagt"
 version = "0.1.0"
 description = "Kubernetes diagnostics: offline bundles, deterministic checks, and an LLM investigation loop that proposes fixes one at a time with human approval."
 readme = "README.md"
@@ -21,21 +21,21 @@ classifiers = [
 dev = ["pytest>=7"]
 
 [project.scripts]
-kdiag = "kdiag.cli:main"
+kubeagt = "kubeagt.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/tydev-new/kdiag"
+Homepage = "https://github.com/tydev-new/kubeagt"
 
 [tool.setuptools]
-packages = ["kdiag", "kdiag.scenarios"]
+packages = ["kubeagt", "kubeagt.scenarios"]
 
 [tool.setuptools.package-dir]
 "" = "src"
-"kdiag.scenarios" = "scenarios"
+"kubeagt.scenarios" = "scenarios"
 
 [tool.setuptools.package-data]
-kdiag = ["py.typed"]
-"kdiag.scenarios" = ["*/*.yaml", "*/*.md"]
+kubeagt = ["py.typed"]
+"kubeagt.scenarios" = ["*/*.yaml", "*/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

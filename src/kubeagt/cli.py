@@ -1,4 +1,4 @@
-"""kdiag command line: collect, check, fix (alias run), eval."""
+"""kubeagt command line: collect, check, fix (alias run), eval."""
 from __future__ import annotations
 
 import argparse
@@ -33,13 +33,13 @@ def _llm_args(p: argparse.ArgumentParser) -> None:
                         "none: rules only. mock: keyless test provider, makes no LLM API calls. "
                         "relay: write each request to the relay dir and wait for a human/agent-written response. "
                         "live: require the provider (openai is an alias).")
-    g.add_argument("--relay-dir", help="relay mode: directory for req-N.json / resp-N.json (default $KDIAG_RELAY_DIR or $KDIAG_HOME/relay)")
+    g.add_argument("--relay-dir", help="relay mode: directory for req-N.json / resp-N.json (default $KUBEAGT_RELAY_DIR or $KUBEAGT_HOME/relay)")
     g.add_argument("--relay-timeout", type=float, default=900.0, help="relay mode: seconds to wait for each response (default 900)")
     g.add_argument("--llm-provider", choices=sorted(PRESETS),
                    help=f"preset for base URL, key env var, default model and prices "
-                        f"(default $KDIAG_LLM_PROVIDER or {DEFAULT_PROVIDER}: {DEFAULT_BASE_URL}, key ${DEFAULT_KEY_ENV})")
-    g.add_argument("--llm-base-url", help="override the preset base URL ($KDIAG_LLM_BASE_URL)")
-    g.add_argument("--llm-model", help=f"override the preset model ($KDIAG_LLM_MODEL; OpenRouter default {DEFAULT_MODEL}, "
+                        f"(default $KUBEAGT_LLM_PROVIDER or {DEFAULT_PROVIDER}: {DEFAULT_BASE_URL}, key ${DEFAULT_KEY_ENV})")
+    g.add_argument("--llm-base-url", help="override the preset base URL ($KUBEAGT_LLM_BASE_URL)")
+    g.add_argument("--llm-model", help=f"override the preset model ($KUBEAGT_LLM_MODEL; OpenRouter default {DEFAULT_MODEL}, "
                                        "check https://openrouter.ai/models for current slugs)")
     g.add_argument("--llm-key-env", help="name of the env var holding the API key (preset default, e.g. OPENROUTER_API_KEY)")
     g.add_argument("--max-steps", type=int, default=12, help="max LLM turns per investigation (default 12)")
@@ -52,13 +52,13 @@ def _cfg(a) -> LLMConfig:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="kdiag", description="Kubernetes diagnostics with approval-gated fixes.")
-    p.add_argument("--version", action="version", version=f"kdiag {__version__}")
+    p = argparse.ArgumentParser(prog="kubeagt", description="Kubernetes diagnostics with approval-gated fixes.")
+    p.add_argument("--version", action="version", version=f"kubeagt {__version__}")
     sub = p.add_subparsers(dest="cmd")
 
     c = sub.add_parser("collect", help="write a redacted snapshot bundle of a namespace (dir or .zip)")
     _common(c)
-    c.add_argument("-o", "--output", help="output path; ends with .zip for a zip (default kdiag-bundle-<ns>-<time>.zip)")
+    c.add_argument("-o", "--output", help="output path; ends with .zip for a zip (default kubeagt-bundle-<ns>-<time>.zip)")
     c.add_argument("--log-tail", type=int, default=50)
 
     k = sub.add_parser("check", help="run deterministic checks, live or against a bundle (no changes, no LLM)")
@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
         f.add_argument("--max-fixes", type=int, default=10)
         f.add_argument("--verify-timeout", type=int, default=120, help="seconds to wait for rollout/health after a fix")
         f.add_argument("--min-memory", type=float, default=MIN_MEMORY_MIB)
-        f.add_argument("--session-dir", help="where to write audit.jsonl and report.json (default ~/.kdiag/sessions/<time>)")
+        f.add_argument("--session-dir", help="where to write audit.jsonl and report.json (default ~/.kubeagt/sessions/<time>)")
 
     e = sub.add_parser("eval", help="run scenario evals on a test cluster and write a scorecard")
     _common(e, ns=False)
@@ -101,7 +101,7 @@ def cmd_collect(a) -> int:
         print(f"namespace {a.namespace} not found (context {kc.current_context()})", file=sys.stderr)
         return 2
     b = collect(kc, log_tail=a.log_tail, progress=lambda s: print("  " + s, file=sys.stderr))
-    out = Path(a.output or f"kdiag-bundle-{a.namespace}-{time.strftime('%Y%m%d-%H%M%S')}.zip")
+    out = Path(a.output or f"kubeagt-bundle-{a.namespace}-{time.strftime('%Y%m%d-%H%M%S')}.zip")
     path = b.save(out)
     print(f"wrote {path}  (redacted; Secret values were never read)")
     return 0
@@ -140,7 +140,7 @@ def cmd_check(a) -> int:
         b = collect(kc)
     findings = run_rules(b, a.min_memory)
     if not a.json:
-        print(f"kdiag check: {where}")
+        print(f"kubeagt check: {where}")
     print_findings(findings, a.json)
     return 1 if any(f.root_cause for f in findings) else 0
 
@@ -195,7 +195,7 @@ def cmd_eval(a) -> int:
             print(s.name)
         return 0
     if not (a.context or a.kubeconfig):
-        print("kdiag eval creates and deletes kdiag-eval-* namespaces. Pass --context and/or --kubeconfig "
+        print("kubeagt eval creates and deletes kubeagt-eval-* namespaces. Pass --context and/or --kubeconfig "
               "explicitly so it never runs against your current context by accident.", file=sys.stderr)
         return 2
     kc = ReadOnlyKubectl(KubeTarget("default", a.context, os.path.expanduser(a.kubeconfig) if a.kubeconfig else None))
@@ -210,7 +210,7 @@ def cmd_eval(a) -> int:
     llm_desc = (a.llm if a.llm == "none" else f"{a.llm} (offline, no LLM API calls)" if a.llm == "mock"
                 else RELAY_NAME if a.llm == "relay"
                 else f"{a.llm} ({cfg.provider}, {cfg.model})") if a.llm != "auto" else ("auto (" + ("key set" if cfg.api_key() else "no key, rules only") + ")")
-    print(f"kdiag eval: {len(scen)} scenario(s) on context {ctx}, LLM mode {llm_desc}")
+    print(f"kubeagt eval: {len(scen)} scenario(s) on context {ctx}, LLM mode {llm_desc}")
     out = Path(a.out)
     results = []
     for s in scen:

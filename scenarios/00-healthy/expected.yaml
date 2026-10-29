@@ -1,4 +1,4 @@
-description: Healthy Redis Deployment and Service. kdiag should find nothing and change nothing.
+description: Healthy Redis Deployment and Service. kubeagt should find nothing and change nothing.
 steps:
   - {apply: manifest.yaml, wait_ready: true}
 settle_seconds: 5

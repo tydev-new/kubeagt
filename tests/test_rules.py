@@ -1,7 +1,7 @@
 from helpers import (bundle, event, node, pod_for, redis_deployment, replicaset_for, service)
 
-from kdiag.patching import apply_json_patch
-from kdiag.rules import run_rules
+from kubeagt.patching import apply_json_patch
+from kubeagt.rules import run_rules
 
 
 def roots(findings):

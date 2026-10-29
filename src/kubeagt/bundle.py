@@ -142,7 +142,7 @@ def collect(kc: ReadOnlyKubectl, log_tail: int = 50, progress=None, kinds: Optio
         "namespace": ns,
         "context": kc.t.context,
         "collected_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "kdiag_version": __version__,
+        "kubeagt_version": __version__,
         "counts": {k: len(v) for k, v in resources.items()},
         "errors": errors,
         "redaction": "Secret values never read; ConfigMap values and env values with sensitive names redacted; token-like strings masked in logs.",

@@ -5,7 +5,7 @@ import textwrap
 
 import pytest
 
-from kdiag.kube import KubeTarget, KubeWriter, ReadOnlyKubectl, ToolRefused, validate_read_argv
+from kubeagt.kube import KubeTarget, KubeWriter, ReadOnlyKubectl, ToolRefused, validate_read_argv
 
 
 @pytest.mark.parametrize("argv", [

@@ -4,6 +4,6 @@ build/
 dist/
 .venv/
 .pytest_cache/
-kdiag-bundle-*/
-kdiag-bundle-*.zip
-.kdiag/
+kubeagt-bundle-*/
+kubeagt-bundle-*.zip
+.kubeagt/

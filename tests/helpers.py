@@ -6,9 +6,9 @@ import json
 import subprocess
 from typing import Dict, List
 
-from kdiag.bundle import Bundle
-from kdiag.patching import apply_patch
-from kdiag.quantity import mib
+from kubeagt.bundle import Bundle
+from kubeagt.patching import apply_patch
+from kubeagt.quantity import mib
 
 NS = "demo"
 

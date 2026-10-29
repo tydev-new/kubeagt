@@ -4,9 +4,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from kdiag.agent import Budget, Investigator
-from kdiag.kube import validate_read_argv
-from kdiag.llm import HintFollowingMock, LLMConfig, LLMError, OpenAICompatClient, ScriptedLLM, make_client, tool_call
+from kubeagt.agent import Budget, Investigator
+from kubeagt.kube import validate_read_argv
+from kubeagt.llm import HintFollowingMock, LLMConfig, LLMError, OpenAICompatClient, ScriptedLLM, make_client, tool_call
 
 
 class FakeKC:
@@ -165,8 +165,8 @@ def test_client_retries_then_fails(server, monkeypatch):
 
 
 def _clear_llm_env(monkeypatch):
-    for k in ("KDIAG_LLM_PROVIDER", "KDIAG_LLM_BASE_URL", "KDIAG_LLM_MODEL", "KDIAG_LLM_API_KEY_ENV",
-              "KDIAG_PRICE_IN_PER_MTOK", "KDIAG_PRICE_OUT_PER_MTOK", "OPENROUTER_API_KEY", "XAI_API_KEY"):
+    for k in ("KUBEAGT_LLM_PROVIDER", "KUBEAGT_LLM_BASE_URL", "KUBEAGT_LLM_MODEL", "KUBEAGT_LLM_API_KEY_ENV",
+              "KUBEAGT_PRICE_IN_PER_MTOK", "KUBEAGT_PRICE_OUT_PER_MTOK", "OPENROUTER_API_KEY", "XAI_API_KEY"):
         monkeypatch.delenv(k, raising=False)
 
 
@@ -199,13 +199,13 @@ def test_xai_direct_preset(monkeypatch):
     _clear_llm_env(monkeypatch)
     cfg = LLMConfig.from_env(provider="xai")
     assert (cfg.base_url, cfg.model, cfg.api_key_env) == ("https://api.x.ai/v1", "grok-4.7", "XAI_API_KEY")
-    monkeypatch.setenv("KDIAG_LLM_PROVIDER", "xai")
+    monkeypatch.setenv("KUBEAGT_LLM_PROVIDER", "xai")
     assert LLMConfig.from_env().base_url == "https://api.x.ai/v1"
 
 
 def test_custom_provider_needs_base_url_and_model(monkeypatch):
     _clear_llm_env(monkeypatch)
-    monkeypatch.setenv("KDIAG_LLM_API_KEY", "k")
+    monkeypatch.setenv("KUBEAGT_LLM_API_KEY", "k")
     cfg = LLMConfig.from_env(provider="custom")
     with pytest.raises(LLMError, match="base URL"):
         OpenAICompatClient(cfg)
@@ -217,16 +217,16 @@ def test_custom_provider_needs_base_url_and_model(monkeypatch):
 
 def test_unknown_provider_rejected(monkeypatch):
     _clear_llm_env(monkeypatch)
-    monkeypatch.setenv("KDIAG_LLM_PROVIDER", "nope")
+    monkeypatch.setenv("KUBEAGT_LLM_PROVIDER", "nope")
     with pytest.raises(LLMError, match="unknown LLM provider"):
         LLMConfig.from_env()
 
 
 def test_config_from_env(monkeypatch):
     _clear_llm_env(monkeypatch)
-    monkeypatch.setenv("KDIAG_LLM_BASE_URL", "https://api.openai.com/v1")
-    monkeypatch.setenv("KDIAG_LLM_MODEL", "gpt-x")
-    monkeypatch.setenv("KDIAG_LLM_API_KEY_ENV", "OPENAI_API_KEY")
+    monkeypatch.setenv("KUBEAGT_LLM_BASE_URL", "https://api.openai.com/v1")
+    monkeypatch.setenv("KUBEAGT_LLM_MODEL", "gpt-x")
+    monkeypatch.setenv("KUBEAGT_LLM_API_KEY_ENV", "OPENAI_API_KEY")
     cfg = LLMConfig.from_env(model="override")
     assert (cfg.base_url, cfg.model, cfg.api_key_env) == ("https://api.openai.com/v1", "override", "OPENAI_API_KEY")
 
@@ -235,7 +235,7 @@ def test_openrouter_attribution_headers_only_for_openrouter(monkeypatch):
     _clear_llm_env(monkeypatch)
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
     c = OpenAICompatClient(LLMConfig.from_env())
-    assert c._extra_headers()["X-Title"] == "kdiag"
+    assert c._extra_headers()["X-Title"] == "kubeagt"
     c2 = OpenAICompatClient(LLMConfig.from_env(base_url="http://127.0.0.1:1/v1"))
     assert c2._extra_headers() == {}
 

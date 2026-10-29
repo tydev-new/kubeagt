@@ -290,7 +290,7 @@ class KubeWriter:
     def normalize(kind: str, name: str, patch_type: str, patch) -> tuple:
         k = WRITE_KINDS.get(str(kind).lower())
         if not k:
-            raise ToolRefused(f"kind '{kind}' cannot be patched by kdiag (allowed: {sorted(set(WRITE_KINDS.values()))})")
+            raise ToolRefused(f"kind '{kind}' cannot be patched by kubeagt (allowed: {sorted(set(WRITE_KINDS.values()))})")
         if not name or "/" in name or " " in name:
             raise ToolRefused(f"bad resource name '{name}'")
         pt = str(patch_type).lower()

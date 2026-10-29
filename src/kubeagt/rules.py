@@ -208,7 +208,7 @@ def check_node_selector(b: Bundle) -> List[Finding]:
             evidence=ev,
             reasoning=("Removing the selector lets the scheduler place the pod on any node. The alternative is to label a node "
                        f"(kubectl label node <node> {', '.join(f'{k}={sel[k]}' for k in bad)}), which is right if the workload truly needs special hardware; "
-                       "kdiag does not modify nodes, so it proposes the workload-side change."),
+                       "kubeagt does not modify nodes, so it proposes the workload-side change."),
             fix=Fix(kind, _wname(w), "json", patch, what, confidence="high"),
         ))
     return out
@@ -300,7 +300,7 @@ def check_probe_ports(b: Bundle) -> List[Finding]:
                         evidence=ev,
                         reasoning=(f"Pointing the probe at port {target} makes it test the process that is actually serving. "
                                    "The probe type and timings are left unchanged." if target else
-                                   "kdiag cannot tell which port is correct, so it does not propose a patch."),
+                                   "kubeagt cannot tell which port is correct, so it does not propose a patch."),
                         fix=fix,
                     ))
     return out
@@ -410,7 +410,7 @@ def check_pod_status(b: Bundle) -> List[Finding]:
                     title="container cannot be created: missing config reference",
                     diagnosis=f"Container {cname} references configuration that does not exist: {waiting.get('message', '')}.",
                     evidence=[f"pod {pname} waiting: {reason}: {waiting.get('message', '')}"],
-                    reasoning=("Create the missing ConfigMap or Secret, or remove the reference. kdiag never creates or reads "
+                    reasoning=("Create the missing ConfigMap or Secret, or remove the reference. kubeagt never creates or reads "
                                "Secrets/ConfigMap contents, so this needs a human."),
                 ))
                 continue
@@ -458,7 +458,7 @@ def _image_finding(b, okind, oname, w, cname, cs, pname, waiting) -> Finding:
     ev = [f"pod {pname} container {cname} waiting: {waiting.get('reason')}: {(waiting.get('message') or '')[:220]}"]
     ev += [_event_line(e) for e in events_for(b, [pname], ["Failed"])[:1]]
     fix = None
-    reasoning = "kdiag found no earlier working image to roll back to; fix the tag or registry credentials by hand."
+    reasoning = "kubeagt found no earlier working image to roll back to; fix the tag or registry credentials by hand."
     if okind == "Deployment" and w is not None:
         ci = _container_index(w, cname)
         prev = _previous_image(b, oname, cname, image)

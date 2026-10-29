@@ -1,4 +1,4 @@
-description: Redis with a 5Mi memory request and limit. On the kind test cluster idle Redis (about 3.4MB) actually starts under this cap, so kdiag flags it as a no-headroom misconfiguration (warning) rather than an observed crash.
+description: Redis with a 5Mi memory request and limit. On the kind test cluster idle Redis (about 3.4MB) actually starts under this cap, so kubeagt flags it as a no-headroom misconfiguration (warning) rather than an observed crash.
 steps:
   - {apply: manifest.yaml}
 settle_seconds: 30

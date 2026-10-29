@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>kdiag design</title>
+<title>kubeagt design</title>
 <style>
   :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --bg:#ffffff; --soft:#f8fafc; }
   * { box-sizing: border-box; }
@@ -52,8 +52,8 @@
 <body>
 <main>
 
-<h1>kdiag design</h1>
-<p class="sub">Kubernetes diagnostics with approval-gated fixes. Version 0.1. Written from the code in <code>src/kdiag</code> and <code>README.md</code>.</p>
+<h1>kubeagt design</h1>
+<p class="sub">Kubernetes diagnostics with approval-gated fixes. Version 0.1. Written from the code in <code>src/kubeagt</code> and <code>README.md</code>.</p>
 
 <div class="toc"><strong>Contents</strong>
 <ol>
@@ -69,20 +69,20 @@
 </ol></div>
 
 <h2 id="purpose">1. Purpose and goals</h2>
-<p>kdiag diagnoses a broken Kubernetes namespace and fixes it one change at a time, with the user's approval. It collects a redacted snapshot, runs deterministic rule checks, optionally lets an LLM investigate with read-only kubectl tools under step, token, and spend caps, then proposes a single fix with a diagnosis, evidence, an exact diff, and the reasoning. Nothing changes until the user answers <code>y</code>. After each change kdiag waits for the rollout, re-checks the namespace, and feeds the new state into the next proposal. It installs from the GitHub repo with <code>pip</code>, needs only Python 3.9+, <code>kubectl</code>, and PyYAML, and works fully without an LLM.</p>
+<p>kubeagt diagnoses a broken Kubernetes namespace and fixes it one change at a time, with the user's approval. It collects a redacted snapshot, runs deterministic rule checks, optionally lets an LLM investigate with read-only kubectl tools under step, token, and spend caps, then proposes a single fix with a diagnosis, evidence, an exact diff, and the reasoning. Nothing changes until the user answers <code>y</code>. After each change kubeagt waits for the rollout, re-checks the namespace, and feeds the new state into the next proposal. It installs from the GitHub repo with <code>pip</code>, needs only Python 3.9+, <code>kubectl</code>, and PyYAML, and works fully without an LLM.</p>
 
 <h2 id="nongoals">2. Non-goals</h2>
 <ul>
   <li><strong>Cluster-wide diagnosis.</strong> One namespace per session. Cluster-scoped problems (node pressure, CNI, DNS) are seen only through their symptoms.</li>
-  <li><strong>Creating or deleting objects.</strong> The write path only runs <code>kubectl patch</code> on existing Deployments, StatefulSets, DaemonSets, Services, ConfigMaps, and PVCs. kdiag never modifies nodes, RBAC, or Secrets, and never creates missing ConfigMaps or Secrets (the <code>container-config-error</code> rule reports but does not fix).</li>
+  <li><strong>Creating or deleting objects.</strong> The write path only runs <code>kubectl patch</code> on existing Deployments, StatefulSets, DaemonSets, Services, ConfigMaps, and PVCs. kubeagt never modifies nodes, RBAC, or Secrets, and never creates missing ConfigMaps or Secrets (the <code>container-config-error</code> rule reports but does not fix).</li>
   <li><strong>Autonomous remediation.</strong> The LLM can only propose. <code>--yes</code> exists for CI and evals, not for clusters you care about.</li>
   <li><strong>Resource tuning.</strong> Automatic fixes are conservative heuristics; memory values such as 128Mi request and 512Mi limit are starting points.</li>
-  <li><strong>Extra surfaces in v0.1.</strong> There is no web UI, daemon, or MCP server; kdiag is a CLI. The only runtime dependency is PyYAML, and LLM HTTP calls use the Python standard library.</li>
+  <li><strong>Extra surfaces in v0.1.</strong> There is no web UI, daemon, or MCP server; kubeagt is a CLI. The only runtime dependency is PyYAML, and LLM HTTP calls use the Python standard library.</li>
 </ul>
 
 <h2 id="components">3. Components</h2>
 <div class="figure">
-<svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kdiag component block diagram">
+<svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kubeagt component block diagram">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
     <marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
@@ -110,7 +110,7 @@
 
   <rect class="bx" x="640" y="22" width="300" height="68" rx="8"/>
   <text class="t1" x="790" y="44" text-anchor="middle">evals.py</text>
-  <text class="t2" x="790" y="62" text-anchor="middle">scenarios/ on kind, kdiag-eval-* namespaces</text>
+  <text class="t2" x="790" y="62" text-anchor="middle">scenarios/ on kind, kubeagt-eval-* namespaces</text>
   <text class="t2" x="790" y="78" text-anchor="middle">scorecard.md and scorecard.json</text>
 
   <path class="ln" d="M220,56 L296,56" marker-end="url(#a)"/>
@@ -229,12 +229,12 @@
 <tr><td><code>patching.py</code></td><td>Local RFC 6902 subset and RFC 7386 merge patch for previews, and <code>spec_diff</code>.</td></tr>
 <tr><td><code>health.py</code></td><td>What "fixed" means: workloads fully ready and updated, pods Running and Ready, selector Services with ready endpoints. <code>wait_healthy</code> polls.</td></tr>
 <tr><td><code>evals.py</code></td><td>Scenario harness and scorecard writer.</td></tr>
-<tr><td><code>audit.py</code></td><td>Append-only JSON lines log in <code>~/.kdiag/sessions/&lt;time&gt;/</code> (or <code>KDIAG_HOME</code>).</td></tr>
+<tr><td><code>audit.py</code></td><td>Append-only JSON lines log in <code>~/.kubeagt/sessions/&lt;time&gt;/</code> (or <code>KUBEAGT_HOME</code>).</td></tr>
 </table>
 
 <h2 id="flow">4. Fix loop flow</h2>
 <div class="figure">
-<svg viewBox="0 0 1000 1110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kdiag fix loop flow chart">
+<svg viewBox="0 0 1000 1110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kubeagt fix loop flow chart">
   <defs>
     <marker id="f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
     <marker id="fw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
@@ -243,7 +243,7 @@
 
   <!-- Start -->
   <rect class="bx-core" x="270" y="20" width="260" height="44" rx="22"/>
-  <text class="t1" x="400" y="47" text-anchor="middle">kdiag fix -n NS</text>
+  <text class="t1" x="400" y="47" text-anchor="middle">kubeagt fix -n NS</text>
   <path class="ln" d="M400,64 L400,91" marker-end="url(#f)"/>
 
   <!-- Collect -->
@@ -388,7 +388,7 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
   <li>Verbs: <code>get</code>, <code>describe</code>, <code>logs</code>, <code>events</code>, <code>explain</code>, <code>top</code>, <code>version</code>, <code>api-resources</code>.</li>
   <li>Resources: workloads, pods, services, endpoints, config maps, PVCs, nodes, events, ingresses, network policies, and similar. Secrets are not on the list.</li>
   <li>Flags: a fixed set; output formats limited to json, yaml, wide, name, jsonpath, custom-columns (so no go-templates). <code>--raw</code>, <code>--kubeconfig</code>, <code>--context</code>, <code>--token</code>, <code>exec</code> are refused.</li>
-  <li>The namespace is pinned: kdiag appends <code>-n</code> itself and the Investigator refuses <code>-n</code>, <code>--namespace</code>, <code>-A</code>.</li>
+  <li>The namespace is pinned: kubeagt appends <code>-n</code> itself and the Investigator refuses <code>-n</code>, <code>--namespace</code>, <code>-A</code>.</li>
 </ul>
 </div>
 <div>
@@ -406,19 +406,19 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
 <h3>No creation of nodes, Secrets, or new objects</h3>
 <ul>
   <li>Writable kinds: Deployment, StatefulSet, DaemonSet, Service, ConfigMap, PersistentVolumeClaim, and only via patch.</li>
-  <li>Evals refuse to run without an explicit <code>--context</code> or <code>--kubeconfig</code>, and only create or delete <code>kdiag-eval-*</code> namespaces.</li>
+  <li>Evals refuse to run without an explicit <code>--context</code> or <code>--kubeconfig</code>, and only create or delete <code>kubeagt-eval-*</code> namespaces.</li>
 </ul>
 </div>
 </div>
 
 <h2 id="llm">6. LLM provider configuration</h2>
-<p>Any OpenAI-compatible chat completions API with tool calling works. Precedence: CLI flags, then <code>KDIAG_LLM_*</code> environment variables, then the provider preset. Each user brings their own key; kdiag reads it from an environment variable and never stores it.</p>
+<p>Any OpenAI-compatible chat completions API with tool calling works. Precedence: CLI flags, then <code>KUBEAGT_LLM_*</code> environment variables, then the provider preset. Each user brings their own key; kubeagt reads it from an environment variable and never stores it.</p>
 <table>
 <tr><th>Preset</th><th>Base URL</th><th>Key variable</th><th>Default model</th></tr>
 <tr><td><code>openrouter</code> (default)</td><td><code>https://openrouter.ai/api/v1</code></td><td><code>OPENROUTER_API_KEY</code></td><td><code>x-ai/grok-4.7</code></td></tr>
 <tr><td><code>xai</code></td><td><code>https://api.x.ai/v1</code></td><td><code>XAI_API_KEY</code></td><td><code>grok-4.7</code></td></tr>
 <tr><td><code>openai</code></td><td><code>https://api.openai.com/v1</code></td><td><code>OPENAI_API_KEY</code></td><td>none, set <code>--llm-model</code></td></tr>
-<tr><td><code>custom</code></td><td>none, set <code>--llm-base-url</code></td><td><code>KDIAG_LLM_API_KEY</code></td><td>none, set <code>--llm-model</code></td></tr>
+<tr><td><code>custom</code></td><td>none, set <code>--llm-base-url</code></td><td><code>KUBEAGT_LLM_API_KEY</code></td><td>none, set <code>--llm-model</code></td></tr>
 </table>
 <table>
 <tr><th><code>--llm</code> mode</th><th>Behavior</th></tr>
@@ -433,13 +433,13 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
 <h2 id="cli">7. CLI commands</h2>
 <table>
 <tr><th>Command</th><th>What it does</th><th>Changes the cluster?</th></tr>
-<tr><td><code>kdiag collect -n NS [-o bundle.zip] [--log-tail 50]</code></td><td>Writes a redacted snapshot bundle (directory, or zip if the path ends in .zip).</td><td>No</td></tr>
-<tr><td><code>kdiag check -n NS [--json] [--min-memory 32]</code></td><td>Runs the deterministic rules live and prints findings. Exit code 1 if any root cause is found.</td><td>No</td></tr>
-<tr><td><code>kdiag check --bundle bundle.zip</code></td><td>Same rules against an offline bundle.</td><td>No</td></tr>
-<tr><td><code>kdiag fix -n NS</code> (alias <code>run</code>)</td><td>The interactive loop above. Options include <code>--yes</code>, <code>--max-fixes</code>, <code>--verify-timeout</code>, <code>--session-dir</code>, and the LLM flags.</td><td>Only after <code>y</code></td></tr>
-<tr><td><code>kdiag eval --context CTX [--only 04] [--out eval-results] [--keep] [--list]</code></td><td>Runs bundled scenarios and writes a scorecard.</td><td>Yes, in <code>kdiag-eval-*</code> namespaces only</td></tr>
+<tr><td><code>kubeagt collect -n NS [-o bundle.zip] [--log-tail 50]</code></td><td>Writes a redacted snapshot bundle (directory, or zip if the path ends in .zip).</td><td>No</td></tr>
+<tr><td><code>kubeagt check -n NS [--json] [--min-memory 32]</code></td><td>Runs the deterministic rules live and prints findings. Exit code 1 if any root cause is found.</td><td>No</td></tr>
+<tr><td><code>kubeagt check --bundle bundle.zip</code></td><td>Same rules against an offline bundle.</td><td>No</td></tr>
+<tr><td><code>kubeagt fix -n NS</code> (alias <code>run</code>)</td><td>The interactive loop above. Options include <code>--yes</code>, <code>--max-fixes</code>, <code>--verify-timeout</code>, <code>--session-dir</code>, and the LLM flags.</td><td>Only after <code>y</code></td></tr>
+<tr><td><code>kubeagt eval --context CTX [--only 04] [--out eval-results] [--keep] [--list]</code></td><td>Runs bundled scenarios and writes a scorecard.</td><td>Yes, in <code>kubeagt-eval-*</code> namespaces only</td></tr>
 </table>
-<p>All commands accept <code>--kubeconfig</code> and <code>--context</code>; kdiag uses kubectl's defaults when they are omitted and always prints the context it acts on. Exit code 2 signals setup errors such as a missing namespace or kubectl error.</p>
+<p>All commands accept <code>--kubeconfig</code> and <code>--context</code>; kubeagt uses kubectl's defaults when they are omitted and always prints the context it acts on. Exit code 2 signals setup errors such as a missing namespace or kubectl error.</p>
 
 <h3>Rules and automatic fixes</h3>
 <table>
@@ -458,7 +458,7 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
 </table>
 
 <h2 id="evals">8. Evals and scorecard</h2>
-<p>Each directory in <code>scenarios/</code> has a <code>manifest.yaml</code> and an <code>expected.yaml</code> listing setup steps, expected root-cause rules, field checks the fixed objects must pass, and whether the namespace should be healthy afterwards. For each scenario the harness resets a <code>kdiag-eval-&lt;name&gt;</code> namespace, applies the manifests, waits to settle, runs the rules for detection, runs a <code>FixSession</code> with <code>yes=True</code>, checks the live objects, and deletes the namespace unless <code>--keep</code> is set.</p>
+<p>Each directory in <code>scenarios/</code> has a <code>manifest.yaml</code> and an <code>expected.yaml</code> listing setup steps, expected root-cause rules, field checks the fixed objects must pass, and whether the namespace should be healthy afterwards. For each scenario the harness resets a <code>kubeagt-eval-&lt;name&gt;</code> namespace, applies the manifests, waits to settle, runs the rules for detection, runs a <code>FixSession</code> with <code>yes=True</code>, checks the live objects, and deletes the namespace unless <code>--keep</code> is set.</p>
 <table>
 <tr><th>Scenario</th><th>Bug</th></tr>
 <tr><td>00-healthy</td><td>none; nothing should be proposed</td></tr>
@@ -474,7 +474,7 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
 <p>The scorecard (<code>scorecard.md</code> and <code>scorecard.json</code> under <code>--out</code>) reports per scenario: detected versus expected rules, detection, correct fix, healthy after versus expected, fixes applied, steps (fix proposals plus LLM read-only tool calls), and time (diagnosis, fixes, and verification; setup excluded). A scenario passes when detection, fix, and health all match. Transcripts, <code>report.json</code>, and <code>audit.jsonl</code> are written per scenario. Unit tests use pytest with <code>ScriptedLLM</code>; GitHub Actions runs ruff and pytest on Python 3.9 and 3.12, with an optional kind end-to-end eval job.</p>
 
 <h2 id="k8sgpt">9. Positioning versus k8sgpt</h2>
-<p><a href="https://github.com/k8sgpt-ai/k8sgpt">k8sgpt</a> pioneered deterministic analyzers plus a one-shot LLM explanation of what they find. kdiag builds on the same idea and adds:</p>
+<p><a href="https://github.com/k8sgpt-ai/k8sgpt">k8sgpt</a> pioneered deterministic analyzers plus a one-shot LLM explanation of what they find. kubeagt builds on the same idea and adds:</p>
 <ul>
   <li><strong>Agent loop:</strong> the model gathers its own evidence with allowlisted read-only tools, under step, token, and spend caps.</li>
   <li><strong>Gated fixes:</strong> one concrete patch at a time, with diff, evidence, and reasoning, applied only on approval.</li>

@@ -6,10 +6,10 @@ import time
 
 import pytest
 
-from kdiag.agent import Budget, Investigator
-from kdiag.audit import AuditLog
-from kdiag.cli import main
-from kdiag.llm import RELAY_NAME, LLMConfig, LLMError, RelayClient, make_client, tool_call
+from kubeagt.agent import Budget, Investigator
+from kubeagt.audit import AuditLog
+from kubeagt.cli import main
+from kubeagt.llm import RELAY_NAME, LLMConfig, LLMError, RelayClient, make_client, tool_call
 
 from test_agent_llm import FIX, FakeKC, msg
 
@@ -145,8 +145,8 @@ def test_relay_numbering_continues_after_existing_files(tmp_path):
 
 
 def test_make_client_relay_and_default_dir(tmp_path, monkeypatch):
-    monkeypatch.setenv("KDIAG_HOME", str(tmp_path))
-    monkeypatch.delenv("KDIAG_RELAY_DIR", raising=False)
+    monkeypatch.setenv("KUBEAGT_HOME", str(tmp_path))
+    monkeypatch.delenv("KUBEAGT_RELAY_DIR", raising=False)
     c = make_client("relay", LLMConfig.from_env())
     assert isinstance(c, RelayClient) and c.dir == str(tmp_path / "relay") and c.name == RELAY_NAME
     c2 = make_client("relay", LLMConfig.from_env(), str(tmp_path / "x"), 3)
