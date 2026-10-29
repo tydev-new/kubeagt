@@ -85,6 +85,12 @@ Totals: rules-only 7/7, mock 7/7.
 | test_misc | Quantities, redaction, JSON patch, diffs, bundle round trip | 6 |
 | test_policy | Policy filter skeleton: hook runs per proposal and allows everything | 3 |
 
+## Audit format
+
+The eval checks read today's audit events (the version 0 format). The proposed standard envelope and
+the log check in Verify are described in [design.html](design.html#audit); the checks will move to the
+new event names when it ships.
+
 ## Not yet tested
 
 A clean install on a fresh machine, a real cluster with more than one node, and the human response cases with a live model.

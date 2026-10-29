@@ -64,7 +64,8 @@ Answers at the prompt:
 `--yes` approves every fix without asking. It exists for evals; do not use it on a cluster you care about.
 
 Each `fix` session writes `audit.jsonl` and `report.json` under `~/.kubeagt/sessions/<time>/`
-(override with `--session-dir` or `KUBEAGT_HOME`).
+(override with `--session-dir` or `KUBEAGT_HOME`). A standard audit event schema is proposed in
+[docs/design.html](docs/design.html#audit) (Audit event schema); today's events are the version 0 format.
 
 ## What it checks
 
