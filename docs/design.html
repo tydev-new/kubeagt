@@ -53,6 +53,8 @@
   .tag-user { font:700 11px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill:#1d4ed8; letter-spacing:.08em; }
   .tl-u { font:italic 600 11px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill:#1d4ed8; }
   .ln-u { fill:none; stroke:#1d4ed8; stroke-width:1.6; }
+  .ln-a2 { fill:none; stroke:#d97706; stroke-width:1.2; }
+  .tl-a { font:italic 11px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill:#b45309; }
 </style>
 </head>
 <body>
@@ -240,116 +242,148 @@
 
 <h2 id="flow">4. Fix loop flow</h2>
 <div class="figure">
-<svg viewBox="0 0 1000 1010" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kubeagt fix loop flow chart">
+<svg viewBox="0 0 1000 1100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kubeagt fix loop flow chart">
   <defs>
     <marker id="f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
     <marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
     <marker id="fu" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1d4ed8"/></marker>
+    <marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
   </defs>
 
   <!-- Collect and rules -->
   <rect class="bx-read" x="210" y="20" width="340" height="52" rx="8"/>
   <text class="t1" x="380" y="42" text-anchor="middle">Collect snapshot and run rule checks</text>
   <text class="t2" x="380" y="61" text-anchor="middle">secrets redacted, read-only kubectl</text>
-  <path class="ln" d="M380,72 L380,106" marker-end="url(#f)"/>
+  <path class="ln" d="M380,72 L380,96" marker-end="url(#f)"/>
 
-  <!-- Pick next proposal -->
-  <rect class="bx" x="210" y="110" width="340" height="46" rx="8"/>
-  <text class="t1" x="380" y="138" text-anchor="middle">Pick next proposal</text>
-  <path class="ln" d="M380,156 L380,196" marker-end="url(#f)"/>
-
-  <!-- D1 AI enabled (automatic) -->
-  <polygon class="bx-auto" points="380,200 530,240 380,280 230,240"/>
-  <text class="t1" x="380" y="238" text-anchor="middle">AI enabled?</text>
-  <text class="tag-auto" x="380" y="256" text-anchor="middle">kubeagt decides</text>
-  <path class="ln-l" d="M530,240 L616,240" marker-end="url(#fl)"/>
-  <text class="tl" x="560" y="233">yes</text>
-  <path class="ln" d="M380,280 L380,316" marker-end="url(#f)"/>
-  <text class="tl" x="388" y="302">no: next rule fix</text>
-
-  <!-- AI box -->
-  <rect class="bx-llm" x="620" y="210" width="300" height="60" rx="8"/>
-  <text class="t1" x="770" y="235" text-anchor="middle">AI investigates</text>
-  <text class="t2" x="770" y="255" text-anchor="middle">read-only kubectl, step and spend caps</text>
-  <path class="ln-l" d="M770,270 L770,360 L534,360" marker-end="url(#fl)"/>
-  <text class="tl" x="778" y="320">one proposal, or none</text>
-
-  <!-- D2 anything to propose (automatic) -->
-  <polygon class="bx-auto" points="380,320 530,360 380,400 230,360"/>
-  <text class="t1" x="380" y="358" text-anchor="middle">Anything to propose?</text>
-  <text class="tag-auto" x="380" y="376" text-anchor="middle">kubeagt decides</text>
-  <path class="ln" d="M230,360 L105,360 L105,426" marker-end="url(#f)"/>
-  <text class="tl" x="128" y="352">no, or max fixes</text>
-  <path class="ln" d="M380,400 L380,436" marker-end="url(#f)"/>
-  <text class="tl" x="388" y="422">yes</text>
+  <!-- D1 Any errors left (automatic) -->
+  <polygon class="bx-auto" points="380,100 530,140 380,180 230,140"/>
+  <text class="t1" x="380" y="138" text-anchor="middle">Any errors left?</text>
+  <text class="tag-auto" x="380" y="156" text-anchor="middle">kubeagt decides</text>
+  <path class="ln" d="M230,140 L105,140 L105,196" marker-end="url(#f)"/>
+  <text class="tl" x="112" y="158">no, or max fixes</text>
+  <path class="ln" d="M380,180 L380,206" marker-end="url(#f)"/>
+  <text class="tl" x="388" y="198">yes</text>
 
   <!-- Finish -->
-  <rect class="bx-core" x="20" y="430" width="170" height="64" rx="10"/>
-  <text class="t1" x="105" y="456" text-anchor="middle">Finish</text>
-  <text class="t2" x="105" y="476" text-anchor="middle">report and audit log</text>
+  <rect class="bx-core" x="20" y="200" width="170" height="64" rx="10"/>
+  <text class="t1" x="105" y="226" text-anchor="middle">Finish</text>
+  <text class="t2" x="105" y="246" text-anchor="middle">report and audit log</text>
 
-  <!-- Proposal -->
-  <rect class="bx" x="210" y="440" width="340" height="52" rx="8"/>
-  <text class="t1" x="380" y="462" text-anchor="middle">One proposed fix</text>
-  <text class="t2" x="380" y="481" text-anchor="middle">diagnosis, evidence, diff, reasoning</text>
-  <path class="ln" d="M380,492 L380,526" marker-end="url(#f)"/>
+  <!-- D2 Ask the AI (automatic) -->
+  <polygon class="bx-auto" points="380,210 530,250 380,290 230,250"/>
+  <text class="t1" x="380" y="248" text-anchor="middle">Ask the AI?</text>
+  <text class="tag-auto" x="380" y="266" text-anchor="middle">kubeagt decides</text>
+  <path class="ln-l" d="M530,250 L616,250" marker-end="url(#fl)"/>
+  <text class="tl" x="560" y="243">yes</text>
+  <path class="ln" d="M380,290 L380,326" marker-end="url(#f)"/>
+  <text class="tl" x="388" y="312">no: next rule fix</text>
 
-  <!-- D3 dry run (automatic) -->
-  <polygon class="bx-auto" points="380,530 530,570 380,610 230,570"/>
-  <text class="t1" x="380" y="568" text-anchor="middle">Server dry run passes?</text>
-  <text class="tag-auto" x="380" y="586" text-anchor="middle">kubeagt decides</text>
-  <path class="ln" d="M530,570 L975,570"/>
-  <text class="tl" x="560" y="563">no: rejected</text>
-  <path class="ln" d="M380,610 L380,646" marker-end="url(#f)"/>
-  <text class="tl" x="388" y="632">yes</text>
+  <!-- AI box -->
+  <rect class="bx-llm" x="620" y="220" width="280" height="60" rx="8"/>
+  <text class="t1" x="760" y="245" text-anchor="middle">AI investigates</text>
+  <text class="t2" x="760" y="265" text-anchor="middle">read-only kubectl, step and spend caps</text>
+  <path class="ln-l" d="M700,280 L700,370 L534,370" marker-end="url(#fl)"/>
+  <text class="tl" x="708" y="330">one proposal, or none</text>
 
-  <!-- D4 user decision -->
-  <polygon class="bx-user" points="380,650 550,700 380,750 210,700"/>
-  <text class="tag-user" x="380" y="684" text-anchor="middle">YOU DECIDE</text>
-  <text class="t1" x="380" y="702" text-anchor="middle">Apply this fix?</text>
-  <text class="t2" x="380" y="720" text-anchor="middle">y / n / skip / quit</text>
-  <path class="ln-u" d="M550,700 L975,700"/>
-  <text class="tl-u" x="575" y="693">n or skip</text>
-  <path class="ln-u" d="M210,700 L105,700 L105,498" marker-end="url(#fu)"/>
-  <text class="tl-u" x="140" y="693">quit</text>
-  <path class="ln-u" d="M380,750 L380,786" marker-end="url(#fu)"/>
-  <text class="tl-u" x="388" y="772">y</text>
+  <!-- D3 anything to propose (automatic) -->
+  <polygon class="bx-auto" points="380,330 530,370 380,410 230,370"/>
+  <text class="t1" x="380" y="368" text-anchor="middle">Anything to propose?</text>
+  <text class="tag-auto" x="380" y="386" text-anchor="middle">kubeagt decides</text>
+  <path class="ln" d="M230,370 L105,370 L105,268" marker-end="url(#f)"/>
+  <text class="tl" x="112" y="388">no</text>
+  <path class="ln" d="M380,410 L380,436" marker-end="url(#f)"/>
+  <text class="tl" x="388" y="428">yes</text>
+
+  <!-- D dry run (automatic) -->
+  <polygon class="bx-auto" points="380,440 530,480 380,520 230,480"/>
+  <text class="t1" x="380" y="478" text-anchor="middle">Server dry run passes?</text>
+  <text class="tag-auto" x="380" y="496" text-anchor="middle">kubeagt decides</text>
+  <path class="ln" d="M530,480 L636,480" marker-end="url(#f)"/>
+  <text class="tl" x="545" y="473">no: rejected</text>
+  <path class="ln" d="M380,520 L380,546" marker-end="url(#f)"/>
+  <text class="tl" x="388" y="538">yes</text>
+
+  <!-- Show proposal -->
+  <rect class="bx" x="210" y="550" width="340" height="52" rx="8"/>
+  <text class="t1" x="380" y="572" text-anchor="middle">Show you one proposed fix</text>
+  <text class="t2" x="380" y="591" text-anchor="middle">diagnosis, evidence, diff, reasoning</text>
+  <path class="ln" d="M380,602 L380,628" marker-end="url(#f)"/>
+
+  <!-- User decision -->
+  <polygon class="bx-user" points="380,632 550,682 380,732 210,682"/>
+  <text class="tag-user" x="380" y="666" text-anchor="middle">YOU DECIDE</text>
+  <text class="t1" x="380" y="684" text-anchor="middle">Apply this fix?</text>
+  <text class="t2" x="380" y="702" text-anchor="middle">y / n / skip / quit</text>
+  <path class="ln-u" d="M550,682 L636,682" marker-end="url(#fu)"/>
+  <text class="tl-u" x="562" y="675">n or skip</text>
+  <path class="ln-u" d="M210,682 L50,682 L50,268" marker-end="url(#fu)"/>
+  <text class="tl-u" x="140" y="675">quit</text>
+  <path class="ln-u" d="M380,732 L380,758" marker-end="url(#fu)"/>
+  <text class="tl-u" x="388" y="750">y</text>
 
   <!-- Apply -->
-  <rect class="bx-write" x="210" y="790" width="340" height="52" rx="8"/>
-  <text class="t1" x="380" y="812" text-anchor="middle">Apply via separate write path</text>
-  <text class="t2" x="380" y="831" text-anchor="middle">the AI cannot call it</text>
-  <path class="ln" d="M380,842 L380,876" marker-end="url(#f)"/>
+  <rect class="bx-write" x="210" y="762" width="340" height="52" rx="8"/>
+  <text class="t1" x="380" y="784" text-anchor="middle">Apply via separate write path</text>
+  <text class="t2" x="380" y="803" text-anchor="middle">the AI cannot call it</text>
+  <path class="ln" d="M550,788 L636,788" marker-end="url(#f)"/>
+  <text class="tl" x="562" y="781">failed</text>
+  <path class="ln" d="M380,814 L380,840" marker-end="url(#f)"/>
+  <text class="tl" x="388" y="832">ok</text>
 
   <!-- Verify -->
-  <rect class="bx-read" x="210" y="880" width="340" height="52" rx="8"/>
-  <text class="t1" x="380" y="902" text-anchor="middle">Verify rollout</text>
-  <text class="t2" x="380" y="921" text-anchor="middle">wait for the rollout to finish</text>
+  <rect class="bx-read" x="210" y="844" width="340" height="52" rx="8"/>
+  <text class="t1" x="380" y="866" text-anchor="middle">Verify rollout</text>
+  <text class="t2" x="380" y="885" text-anchor="middle">rollout status, re-check the fixed rule</text>
+  <path class="ln" d="M550,870 L636,870" marker-end="url(#f)"/>
+  <text class="tl" x="556" y="863">pass or fail</text>
 
-  <!-- loop: back to pick next proposal (no rule re-run) -->
-  <path class="ln" d="M975,700 L975,133 L554,133" marker-end="url(#f)"/>
-  <text class="tl" x="700" y="126">back to pick next proposal</text>
+  <!-- Session history and audit log (store) -->
+  <path class="bx-audit" d="M640,467 L640,888 A110,12 0 0,0 860,888 L860,467 A110,12 0 0,0 640,467 Z"/>
+  <path class="ln-a2" d="M640,467 A110,12 0 0,0 860,467"/>
+  <text class="t1" x="750" y="560" text-anchor="middle">Record the outcome</text>
+  <text class="t2" x="750" y="580" text-anchor="middle">session history (for the AI)</text>
+  <text class="t2" x="750" y="596" text-anchor="middle">audit log (on disk)</text>
 
-  <!-- loop: after an applied fix, back to the top -->
-  <path class="ln" d="M550,906 L990,906 L990,46 L554,46" marker-end="url(#f)"/>
-  <text class="tl" x="660" y="39">after a fix: re-collect and re-run rules</text>
+  <!-- history fed back to the AI -->
+  <path class="ln-a" d="M800,455 L800,284" marker-end="url(#fa)"/>
+  <text class="tl-a" x="792" y="418" text-anchor="end">past outcomes fed back so</text>
+  <text class="tl-a" x="792" y="432" text-anchor="end">the AI does not repeat them</text>
+
+  <!-- D tried to apply (automatic) -->
+  <path class="ln" d="M750,900 L750,926" marker-end="url(#f)"/>
+  <polygon class="bx-auto" points="750,930 870,970 750,1010 630,970"/>
+  <text class="t1" x="750" y="968" text-anchor="middle">Apply attempted?</text>
+  <text class="tag-auto" x="750" y="986" text-anchor="middle">kubeagt decides</text>
+
+  <!-- no: back to Any errors left (no rule re-run) -->
+  <path class="ln" d="M870,970 L955,970 L955,140 L534,140" marker-end="url(#f)"/>
+  <text class="tl" x="880" y="962">no</text>
+  <text class="tl" x="700" y="133">no rule re-run</text>
+
+  <!-- yes: back to the top -->
+  <path class="ln" d="M750,1010 L750,1030 L985,1030 L985,46 L554,46" marker-end="url(#f)"/>
+  <text class="tl" x="758" y="1024">yes</text>
+  <text class="tl" x="650" y="39">re-collect and re-run rules</text>
 
   <!-- legend -->
-  <g transform="translate(20,960)">
+  <g transform="translate(20,1062)">
     <polygon class="bx-user" points="12,0 24,12 12,24 0,12"/>
     <text class="t2" x="32" y="16">your decision</text>
-    <polygon class="bx-auto" points="142,0 154,12 142,24 130,12"/>
-    <text class="t2" x="162" y="16">automatic, kubeagt decides</text>
-    <rect class="bx-read" x="340" y="4" width="16" height="16" rx="3"/>
-    <text class="t2" x="364" y="16">read only</text>
-    <rect class="bx-llm" x="450" y="4" width="16" height="16" rx="3"/>
-    <text class="t2" x="474" y="16">AI, read-only tools</text>
-    <rect class="bx-write" x="610" y="4" width="16" height="16" rx="3"/>
-    <text class="t2" x="634" y="16">writes to the cluster</text>
+    <polygon class="bx-auto" points="132,0 144,12 132,24 120,12"/>
+    <text class="t2" x="152" y="16">kubeagt decides</text>
+    <rect class="bx-read" x="270" y="4" width="16" height="16" rx="3"/>
+    <text class="t2" x="294" y="16">read only</text>
+    <rect class="bx-llm" x="370" y="4" width="16" height="16" rx="3"/>
+    <text class="t2" x="394" y="16">AI, read-only tools</text>
+    <rect class="bx-write" x="520" y="4" width="16" height="16" rx="3"/>
+    <text class="t2" x="544" y="16">writes to the cluster</text>
+    <rect class="bx-audit" x="690" y="4" width="16" height="16" rx="3"/>
+    <text class="t2" x="714" y="16">session history and audit log</text>
   </g>
 </svg>
 </div>
-<p class="caption">kubeagt makes the gray decisions on its own; you make the blue one. Collection and rule checks run once at the start and again only after an approved fix is applied and its rollout verified, which is the loop back to the top. Every other outcome goes back to Pick next proposal without re-running the rules, because nothing in the cluster changed. When AI is enabled, it investigates with read-only kubectl under step, token, and spend caps, sees the rule findings and the session history, and proposes at most one fix. When AI is off, finds nothing new, or hits a cap, the next unhandled rule fix is used. Each proposal is dry-run on the server before you see it; a rejected dry run is recorded in the session history and kubeagt picks again. Your answers: <code>y</code> applies the fix through the write path; <code>n</code> rejects that exact patch so it is never offered again, and the AI may propose a clearly better alternative; <code>skip</code> sets the whole finding aside for the rest of the session; <code>quit</code> ends the session. The session also finishes when nothing is left to propose or <code>--max-fixes</code> (default 10) is reached. Finish waits for namespace health if any fix was applied, then writes the summary, <code>report.json</code>, and the audit log, where every kubectl command, AI call, and decision is one JSON line. With <code>--yes</code>, every proposal is auto-approved.</p>
+<p class="caption">kubeagt makes the gray decisions on its own; you make the blue one. Collection and rule checks run at the start and again only after kubeagt tried to apply a fix (whether the apply or the verify passed or failed); that is the loop back to the top. After <code>n</code>, <code>skip</code>, or a rejected dry run nothing in the cluster changed, so the loop returns to Any errors left without re-running the rules. Any errors left counts root-cause findings you have not skipped; symptoms linked to a root cause do not count, and the check is also where <code>--max-fixes</code> (default 10) stops the session. Every proposal counts toward that cap, including rejected and declined ones. Ask the AI is yes when an AI provider is configured and the set of open errors changed since the AI last had nothing to propose. The AI investigates with read-only kubectl, up to <code>--max-steps</code> (12) turns per investigation and <code>--max-tokens</code> (200000) and <code>--max-cost</code> ($0.50) for the whole session. It receives the rule findings, the rule fixes not yet tried, and the last 10 session history entries. If it proposes nothing, repeats a patch already tried, or hits a cap, the next untried rule fix is used. An error with no rule fix, such as a missing ConfigMap, is reported but only fixed if the AI proposes something you approve. Every outcome is recorded: a rejected dry run, your <code>n</code> or <code>skip</code>, a failed apply, and a verify that passed or failed together with the new error state. That session history is kept in memory for this session only and fed back to the AI; the same events, plus every kubectl command and AI call, go to the audit log on disk. Separately, a patch already decided or attempted is never proposed again, because kubeagt blocks it by fingerprint. <code>n</code> rejects that exact patch and the AI may suggest a clearly better one; <code>skip</code> sets the whole error aside for the session; <code>quit</code> ends it; <code>--yes</code> answers <code>y</code> to every proposal. Finish waits up to <code>--verify-timeout</code> (120 seconds) for the namespace to become healthy if any fix was applied, then prints the summary and writes <code>report.json</code> and the audit log. The exit code is 0 only if the namespace is healthy.</p>
 
 <h3>Proposal shown to the user</h3>
 <pre><code>Proposed fix 3   source: deterministic rule probe-port-mismatch   confidence: high
