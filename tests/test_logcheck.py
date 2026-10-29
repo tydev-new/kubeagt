@@ -209,3 +209,14 @@ def test_eval_expect_verify_and_scripted_ai(tmp_path):
     ev[0]["detail"]["result"] = "verified"
     assert not all(c["ok"] for c in check_verify(spec, ev))
     assert not check_verify(spec, [])[0]["ok"]          # a missing fix_verify is a failed expectation
+
+
+def test_service_selector_is_read_again_after_the_fix():
+    """Scenario 06: the fix changes the Service selector, so the pods to read are found with the new one."""
+    src = Src([[pod("redis-1", labels={"app": "redis"})]], {("redis-1", "api", False): "Ready to accept connections"},
+              selector={"app": "redis-cache"})
+    base = capture_baseline(src, "Service", "redis")
+    assert base["pods"] == set()
+    src.sel = {"app": "redis"}
+    r = run_log_check(src, "Service", "redis", base, 10, lambda s: None)
+    assert r["outcome"] == "ok" and r["pods"] == ["redis-1"] and not r["no_signal"]

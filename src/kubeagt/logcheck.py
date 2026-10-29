@@ -145,7 +145,7 @@ def run_log_check(src, kind: str, name: str, base: dict, window: float = DEFAULT
     if kind.lower() not in LOG_KINDS:
         return result("skip", f"{kind} has no pods to read logs from")
     try:
-        sel = base.get("selector") or src.selector(kind, name)
+        sel = src.selector(kind, name) or base.get("selector")   # re-read: a Service fix may change the selector
         if not sel:
             return result("warn", f"could not find the pod selector of {kind}/{name}")
         steps = int(math.ceil(window / poll)) if window > 0 else 0
