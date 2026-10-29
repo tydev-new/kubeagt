@@ -173,6 +173,46 @@ KUBEAGT_LLM_API_KEY=unused kubeagt fix -n shop --llm-provider custom \
 against your cluster) and then accepts the first deterministic candidate. It has no reasoning of its
 own; it exists to test the plumbing.
 
+### On-prem and air-gapped clusters
+
+The AI step needs only an OpenAI-compatible `/chat/completions` endpoint with tool calling, so it can run
+entirely inside your network. Point `--llm-provider custom` at a model server you host (Ollama, vLLM,
+LiteLLM, or similar). kubeagt then talks only to your cluster API and that server; nothing leaves the
+network. Rules-only mode (`--llm none`) needs no model at all.
+
+```bash
+# any non-empty value works when the local server ignores keys
+export KUBEAGT_LLM_API_KEY=unused
+# local servers are free, so zero the spend estimate (the custom preset otherwise assumes paid prices)
+export KUBEAGT_PRICE_IN_PER_MTOK=0 KUBEAGT_PRICE_OUT_PER_MTOK=0
+kubeagt fix -n shop --llm live --llm-provider custom \
+  --llm-base-url http://127.0.0.1:11434/v1 --llm-model <model>     # Ollama
+#   --llm-base-url http://vllm.internal:8000/v1 --llm-model <model>  # vLLM
+```
+
+The model that matched Grok on our scorecard, DeepSeek V4.1 Flash, publishes its weights on Hugging Face
+under the MIT license ([deepseek-ai/DeepSeek-V4.1-Flash-1017](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017)),
+with vLLM instructions, so it can be served on-prem the same way. It is large (about 510 GB of weights),
+and our DeepSeek results come from the hosted API through OpenRouter, not a self-hosted copy.
+
+**Local smoke test (2026-10-28, real runs).** Ollama 0.40.13 on the CPU-only test box (8 cores, no GPU),
+Qwen2.5 Instruct GGUF Q4_K_M, kind cluster, one scenario per namespace, `y` piped to the prompt:
+
+```bash
+printf 'y\n' | kubeagt fix --context kind-kubeagt-test -n kubeagt-local-01 --llm live \
+  --llm-provider custom --llm-base-url http://127.0.0.1:11434/v1 --llm-model qwen2.5:0.5b --max-fixes 1
+```
+
+| Model | Scenario | What happened |
+|---|---|---|
+| qwen2.5 0.5B | 01-nodeselector | 1 LLM call, about 5 s, no read-only investigation. It called `propose_fix` with the rule's candidate fix copied almost word for word (remove the nodeSelector). Dry run passed, applied after `y`, verified (rollout, log check, rule re-check), namespace healthy. |
+| qwen2.5 0.5B | 08-missing-configmap | Proposed a malformed patch twice (an object for a JSON patch that also swapped the image to `nginx:latest`). kubeagt refused it before dry run, so it was never shown or applied. Then the model replied without a tool call and the session stopped. Nothing changed. |
+| qwen2.5 1.5B | 08-missing-configmap | Ran one read-only kubectl call with wrong arguments (`get pod <namespace name>`), concluded the namespace did not exist, and wrote `finish` as text instead of calling the tool. Session stopped, no proposal, nothing changed. |
+
+So the plumbing works fully offline, and the guardrails held: the bad patch never reached the approval
+prompt. But models this small do not investigate; they copy the rule candidate or give up. For real
+on-prem use, serve a capable open-weights model with reliable tool calling.
+
 ### Relay mode (a human or another agent plays the model)
 
 `--llm relay` sends each chat completion request to files instead of an API. For request N kubeagt
