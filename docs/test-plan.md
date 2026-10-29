@@ -61,7 +61,9 @@ lists `expect_verify`. Three cases do: 01 expects verified with log ok, 05 expec
 warnings and no_signal (a silent busybox app, so it cannot be confirmed from its logs), and 17
 expects failed with log_check fail and the FATAL line in the evidence.
 
-Note on 08-missing-configmap. Earlier both models marked the envFrom ConfigMap reference
+### The 08-missing-configmap miss
+
+Earlier both models marked the envFrom ConfigMap reference
 `optional: true`; the pod started without its configuration and verify passed. Scenario 08 now runs
 an app that logs `FATAL: API_URL not set` and exits 1 without the config, and case 17 scripts exactly
 that optional: true fix: verify fails it (rollout_check fail, log_check fail with the FATAL lines and

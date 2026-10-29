@@ -19,14 +19,10 @@
 | Rules only, 10 scenario cases and 7 human-answer cases | 17/17 |
 | Mock AI, same 17 cases | 16/17 first pass; the miss was a stale namespace timeout, 05 passed on rerun |
 
-The honest miss is `08-missing-configmap`. Both Grok and DeepSeek marked the missing ConfigMap
-`optional: true`, which hid the error instead of fixing it. Verify now includes a log check, and
-scenario 17 shows it failing exactly that fix (the app logs `FATAL: API_URL not set` and exits). In
-one DeepSeek run the model instead replaced the ConfigMap reference with a made-up `API_URL`. The 08
-app now checks the value against a real in-namespace upstream, and case 18 shows verify failing that
-invented value. In two later live DeepSeek runs on 08 (FAIL both, $0.0018 and $0.0029) the model found
-the real upstream Service and hardcoded the correct URL inline, so the app was healthy and verify
-passed; only a policy check on config source changes can stop that. Details in [docs/test-plan.md](docs/test-plan.md).
+The honest miss is `08-missing-configmap`. With a missing ConfigMap, both models first tried to hide the error
+by marking it `optional: true`; a log check after every fix now catches that (case 17). In later reruns DeepSeek
+instead invented a value or hardcoded the upstream URL inline, so a human `y` (and a future config-source policy
+check) is still required. [Full details](docs/test-plan.md#the-08-missing-configmap-miss).
 
 Design: [docs/design.html](docs/design.html). Test plan and results: [docs/test-plan.md](docs/test-plan.md).
 Roadmap and known limitations: [ROADMAP.md](ROADMAP.md).
