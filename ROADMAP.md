@@ -6,12 +6,11 @@ kubeagt today runs a one-fix-at-a-time loop: diagnose, propose, server dry run, 
 
 These come from real eval runs (see [docs/test-plan.md](docs/test-plan.md)).
 
-- **Live evals score 8/9** for both Grok 4.7 and DeepSeek v4.1 Flash through OpenRouter.
-- **Both models hid the symptom in `08-missing-configmap`.** They set `configMapRef.optional: true`, so the pod became Ready while running without its config. Verify passed because it checks only rollout status and the rules, not app logs. The scorecard counts it as a failure.
+- **Live evals score 8/9** on scenarios 00 to 08 for both Grok 4.7 and DeepSeek v4.1 Flash through OpenRouter. Both miss `08-missing-configmap`.
+- **Symptom hiding on 08.** Earlier both models set `configMapRef.optional: true`. The log check now fails that fix (scenario 17). In the latest DeepSeek run the model instead replaced the ConfigMap reference with a made-up `API_URL` value; the app accepted it, so the log check passed. Only policy checks (items 2 and 3) can stop that.
 - **The policy filter is a skeleton.** It runs on every proposal and allows everything (see [docs/policy-plan.md](docs/policy-plan.md)).
-- **The log check in verify and the standard audit schema are designed, not implemented** (see [docs/design.html](docs/design.html)).
+- **The log check is not shipped as warn-only.** It fails a fix on fatal lines or restarts from the start. A silent app gives only a no_signal warning.
 - **Human-response evals** (y, n, skip, quit, invalid input, Ctrl-D, mixed) pass in rules-only and mock modes but have not been run with a live model.
-- **Scenario 08 uses a silent `busybox` app** that never reads its config, so no log check could catch the bad fix.
 - **`00-healthy` is flaky.** `probe-failing` can fire on readiness Unhealthy events during Redis startup, even after the pod is Ready.
 - **Tested only on a single-node kind cluster.** No multi-node or managed cluster runs yet.
 
@@ -21,20 +20,24 @@ Priority: P1 next, P2 soon, P3 later. Size: S is under a day, M is a few days, L
 
 | # | Item | Why | Priority | Size | Docs |
 |---|---|---|---|---|---|
-| 1 | Log check in verify: before/after log diff with pass, warn, or fail. Ship it as warn-only first. | Verify passed on a pod that was Ready but broken. | P1 | M | [design](docs/design.html) |
 | 2 | Contextual warning for `optional: true` on a missing ConfigMap or Secret. Treat env and envFrom as worse than volumes, require evidence that the config is optional, never auto-approve with `--yes`, and require the log check. | Both live models used it to hide a missing ConfigMap. It is sometimes legitimate, so warn rather than block. | P1 | M | [policy plan](docs/policy-plan.md) |
 | 3 | Allowed patch paths per finding type for the AI. Any other path needs explicit approval and is excluded from `--yes`. | Stops off-target and symptom-hiding patches by design. | P1 | M | [policy plan](docs/policy-plan.md) |
-| 4 | Realistic app for scenario 08 that logs an error and exits when its config is missing. | Makes the case honest and gives the log check a signal. | P1 | S | [test plan](docs/test-plan.md) |
 | 5 | State the AI's goal as "restore intended function, not silence the errors" in the prompt. | Prompt wording affects how often agents take shortcuts. | P1 | S | [design](docs/design.html) |
 | 6 | Reuse kube-score, kube-linter, and Kyverno Pod Security policies as before/after checks on the patched object. Build only what they do not cover: absurd probe thresholds, sleep commands, scope, sizing jumps. | Most planned checks already exist as maintained rules. | P2 | M | [policy plan](docs/policy-plan.md) |
 | 7 | Durability step in verify: restart the pod, or re-check after a watch window, before marking a fix verified. | A fix can look good at first and fail later. | P2 | M | [design](docs/design.html) |
-| 8 | Evals both ways: the reference fix passes, doing nothing fails, and a scripted symptom-hiding fix is blocked or warned. | Proves the scorecard and safeguards can actually fail. | P2 | M | [test plan](docs/test-plan.md) |
-| 9 | Standard audit schema: CloudEvents envelope, OpenTelemetry `k8s.*` and `gen_ai.*` attribute names, and patches applied with `--field-manager=kubeagt`. | Consistent, queryable logs that match the API server audit log. | P2 | M | [design](docs/design.html) |
+| 8 | Evals both ways: the reference fix passes, doing nothing fails, and a scripted symptom-hiding fix is blocked or warned. Partly done: case 17 scripts the optional: true fix and expects verify to fail. | Proves the scorecard and safeguards can actually fail. | P2 | M | [test plan](docs/test-plan.md) |
+| 9 | CloudEvents envelope, OpenTelemetry `k8s.*` and `gen_ai.*` attribute names, and patches applied with `--field-manager=kubeagt`, on top of the v1 audit schema. | Consistent, queryable logs that match the API server audit log. | P2 | M | [design](docs/design.html) |
 | 10 | Fix the `00-healthy` probe-failing flake by ignoring Unhealthy events once the pod is Ready. | Removes a false failure from the scorecard. | P2 | S | [test plan](docs/test-plan.md) |
 | 11 | Remaining policy-plan checks. | Covers the rest of the planned anti-patterns. | P3 | L | [policy plan](docs/policy-plan.md) |
 | 12 | Human-response evals with live models. | The y, n, skip, and quit paths are untested against real model behavior. | P3 | S | [test plan](docs/test-plan.md) |
 | 13 | Multi-node and real-cluster testing. | kind hides scheduling, network, and permission issues. | P3 | L | [test plan](docs/test-plan.md) |
 | 14 | Cross-session outcome memory: remember which fixes worked or were rejected. | Avoids repeating bad proposals across sessions. | P3 | L | [design](docs/design.html) |
+
+## Done
+
+- **Log check in verify** (was item 1): before and after log diff with pass, warn, or fail, including no_signal for silent apps. See [design](docs/design.html#logcheck).
+- **Realistic app for scenario 08** (was item 4): logs `FATAL: API_URL not set` and exits without its config.
+- **Standard audit schema v1** (part of item 9): one envelope for every event, shared check result, one `fix_verify` event, v0 files still readable. See [design](docs/design.html#audit).
 
 ## Prior art
 

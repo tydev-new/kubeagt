@@ -335,7 +335,7 @@
   <!-- Verify -->
   <rect class="bx-read" x="210" y="844" width="340" height="52" rx="8"/>
   <text class="t1" x="380" y="866" text-anchor="middle">Verify</text>
-  <text class="t2" x="380" y="885" text-anchor="middle">rollout status, re-check the fixed rule, log check</text>
+  <text class="t2" x="380" y="885" text-anchor="middle">rollout status, log check, re-check the fixed rule</text>
   <path class="ln" d="M550,870 L636,870" marker-end="url(#f)"/>
   <text class="tl" x="556" y="863">pass or fail</text>
 
@@ -376,25 +376,28 @@
   </g>
 </svg>
 </div>
-<p class="caption">kubeagt makes the gray decisions on its own; you make the blue one. Every outcome goes into Record the outcome first: a rejected dry run, your <code>n</code> or <code>skip</code>, a failed apply, and a verify that passed or failed together with the new error state. From there, after a rejected dry run, <code>n</code>, or <code>skip</code>, nothing in the cluster changed, so the loop returns to Any errors left without re-running the rules. After an apply, whether it failed or the fix was applied and its rollout checked, the loop goes back to the top to re-collect and re-run the rules, once per apply. Verify passes only when the rollout completed and the rule the fix addressed no longer fires; it also includes the post-fix log check described below, which can fail it or pass it with warnings. Each proposal gets exactly one server dry run. Any errors left counts root-cause findings you have not skipped; symptoms linked to a root cause do not count, and this check is also where <code>--max-fixes</code> (default 10) stops the session. That cap counts applied fixes (apply attempts, ok or failed), not proposals. A separate guard stops the session after 3 times <code>--max-fixes</code> proposals (at least 10), so rejected, declined, or repeated proposals cannot loop forever. Ask the AI is yes when an AI provider is configured and the set of open errors changed since the AI last had nothing to propose. The AI investigates with read-only kubectl, up to <code>--max-steps</code> (12) turns per investigation and <code>--max-tokens</code> (200000) and <code>--max-cost</code> ($0.50) for the whole session. It receives the rule findings except the ones you skipped, the rule fixes not yet tried, and the last 10 session history entries, and it can propose patches to Deployments, StatefulSets, DaemonSets, Services, ConfigMaps, and PVCs. If it proposes nothing or hits a cap, the next untried rule fix is used. If it repeats a patch already tried, that is recorded as a rejected repeat and the loop returns to Any errors left; the AI is not asked again until the open errors change. An error with no rule fix, such as a missing ConfigMap, is reported but only fixed if the AI proposes something you approve. Session history is kept in memory for this session only and fed back to the AI; the same events, plus every kubectl command and AI call, are appended to the audit log on disk. Separately, a patch already decided or attempted is never proposed again, because kubeagt blocks it by fingerprint. <code>n</code> rejects that exact patch and the AI may suggest a clearly better one; <code>skip</code> sets the whole error aside for the session; <code>quit</code> ends it; <code>--yes</code> answers <code>y</code> to every proposal. Finish waits up to <code>--verify-timeout</code> (120 seconds) for the namespace to become healthy if any fix was applied, then prints the summary and writes <code>report.json</code> and the audit log. The exit code is 0 only if the namespace is healthy.</p>
+<p class="caption">kubeagt makes the gray decisions on its own; you make the blue one. Every outcome goes into Record the outcome first: a rejected dry run, your <code>n</code> or <code>skip</code>, a failed apply, and a verify that passed or failed together with the new error state. From there, after a rejected dry run, <code>n</code>, or <code>skip</code>, nothing in the cluster changed, so the loop returns to Any errors left without re-running the rules. After an apply, whether it failed or the fix was applied and its rollout checked, the loop goes back to the top to re-collect and re-run the rules, once per apply. Verify runs three checks in order: the rollout completed, the post-fix log check described below, and the rule the fix addressed no longer fires. It fails if any check fails and passes as verified with warnings when the log check warns. Each proposal gets exactly one server dry run. Any errors left counts root-cause findings you have not skipped; symptoms linked to a root cause do not count, and this check is also where <code>--max-fixes</code> (default 10) stops the session. That cap counts applied fixes (apply attempts, ok or failed), not proposals. A separate guard stops the session after 3 times <code>--max-fixes</code> proposals (at least 10), so rejected, declined, or repeated proposals cannot loop forever. Ask the AI is yes when an AI provider is configured and the set of open errors changed since the AI last had nothing to propose. The AI investigates with read-only kubectl, up to <code>--max-steps</code> (12) turns per investigation and <code>--max-tokens</code> (200000) and <code>--max-cost</code> ($0.50) for the whole session. It receives the rule findings except the ones you skipped, the rule fixes not yet tried, and the last 10 session history entries, and it can propose patches to Deployments, StatefulSets, DaemonSets, Services, ConfigMaps, and PVCs. If it proposes nothing or hits a cap, the next untried rule fix is used. If it repeats a patch already tried, that is recorded as a rejected repeat and the loop returns to Any errors left; the AI is not asked again until the open errors change. An error with no rule fix, such as a missing ConfigMap, is reported but only fixed if the AI proposes something you approve. Session history is kept in memory for this session only and fed back to the AI; the same events, plus every kubectl command and AI call, are appended to the audit log on disk. Separately, a patch already decided or attempted is never proposed again, because kubeagt blocks it by fingerprint. <code>n</code> rejects that exact patch and the AI may suggest a clearly better one; <code>skip</code> sets the whole error aside for the session; <code>quit</code> ends it; <code>--yes</code> answers <code>y</code> to every proposal. Finish waits up to <code>--verify-timeout</code> (120 seconds) for the namespace to become healthy if any fix was applied, then prints the summary and writes <code>report.json</code> and the audit log. The exit code is 0 only if the namespace is healthy.</p>
 
 
 <h3 id="logcheck">Verify: log check</h3>
-<p><em>Status: approved design, not implemented yet.</em> A rollout that completes and a rule that stops firing do not prove the app works. The log check is the standard last step of Verify for every applied fix.</p>
+<p><em>Status: implemented</em> (<code>src/kubeagt/logcheck.py</code>). A rollout that completes and a rule that stops firing do not prove the app works. The log check is the standard middle step of Verify for every applied fix: rollout check, log check, rule re-check.</p>
 <ol>
-  <li><strong>Baseline.</strong> Before the patch is applied, kubeagt saves the recent log lines of the target's current pods (the snapshot already collects them).</li>
-  <li><strong>Watch.</strong> After the rollout completes, kubeagt watches the new pods for about 30 seconds and reads their logs, including the previous container's logs if one restarted.</li>
-  <li><strong>Compare.</strong> Only new lines count: lines that also appear in the pre-fix logs are ignored, so an old error that was already there does not fail a good fix.</li>
-  <li><strong>Judge.</strong> The result is one of three outcomes, shown in the table below.</li>
-  <li><strong>Redact.</strong> Every log line is redacted with the same rules as the snapshot before it is written to the audit log, shown to you, or sent to the AI. Evidence is capped (a few lines, each truncated).</li>
+  <li><strong>Baseline.</strong> Just before the patch is applied, kubeagt reads the logs of the target's current pods (current and previous container) and their restart counts, through the read-only kubectl path.</li>
+  <li><strong>Watch.</strong> After the rollout completes, kubeagt watches the target's pods for a window (<code>--log-watch-seconds</code>, default 30), polling every 5 seconds and stopping early on a container exit or restart. It then reads their logs, including the previous container's logs when one restarted. When the rollout did not complete, it reads the logs once without waiting, so the evidence is still recorded.</li>
+  <li><strong>Compare.</strong> Only new lines count. Lines are compared with numbers and ids ignored, so an old error that was already there (even with a new timestamp or request id) does not fail a good fix.</li>
+  <li><strong>Judge.</strong> The result is one of the outcomes in the table below.</li>
+  <li><strong>Redact.</strong> Every log line is redacted with the same rules as the snapshot before it is written to the audit log, shown to you, or sent to the AI. Evidence is capped at 10 lines of 300 characters; each fetch keeps at most the last 500 lines.</li>
 </ol>
+<p>Pods are found from the target's selector: Deployment, StatefulSet, and DaemonSet use <code>spec.selector</code>, a Service uses its pod selector. Up to 20 pods and all their containers are read. Other kinds (ConfigMap, PersistentVolumeClaim) have no pods, so the check records <code>skip</code>.</p>
 <table>
 <tr><th>Outcome</th><th>When</th><th>What happens</th></tr>
-<tr><td>Fail</td><td>Clear evidence the app is broken in the window: a fatal or panic line, a stack trace, a config message such as "missing" or "not set", or a container exit or restart during the window.</td><td>Verify fails. The lines go into the session history so the AI sees them, and the loop re-collects and re-runs the rules as after any apply.</td></tr>
-<tr><td>Warn</td><td>New error-level lines (for example <code>ERROR</code> or <code>level=error</code>) without clear evidence of failure.</td><td>Verify passes as <strong>verified with warnings</strong>. The summary shows you the lines, and they are recorded in the audit log and session history.</td></tr>
+<tr><td>Fail</td><td>Clear evidence the app is broken: a fatal or panic line, a stack trace, a config message such as "missing" or "not set", or a container exit or restart since the fix.</td><td>Verify fails. The lines go into the session history so the AI sees them, and the loop re-collects and re-runs the rules as after any apply.</td></tr>
+<tr><td>Warn</td><td>New error-level lines (for example <code>ERROR</code> or <code>level=error</code>) without clear evidence of failure.</td><td>Verify passes as <strong>verified with warnings</strong>. You see the lines under the verify result, and they are recorded in the audit log and session history.</td></tr>
+<tr><td>Warn (no signal)</td><td>The pods produced no log output at all, or no pods matched. Reason: "no log output; cannot confirm app health from logs". <code>detail.no_signal</code> is true.</td><td>Verified with warnings. A silent app never passes silently and never fails.</td></tr>
+<tr><td>Warn (fetch error)</td><td>The logs could not be read (for example the container is still waiting to start).</td><td>Verified with warnings, with the kubectl error as the reason.</td></tr>
 <tr><td>Pass</td><td>None of the above.</td><td>Verified.</td></tr>
 </table>
-<p><strong>Limit.</strong> A silent app gives no signal: if a container logs nothing, the log check can only pass. That is what happened in scenario 08 in the first live runs: both models marked the missing ConfigMap reference <code>optional: true</code>, the busybox container started and printed nothing, and the fix looked verified. Scenario 08 should get a realistic app that logs an error and exits when its config is missing, so the log check (and the restart signal) can catch that kind of fix.</p>
+<p><strong>Scenario 08.</strong> The first live runs showed the limit of a silent app: both models marked the missing ConfigMap reference <code>optional: true</code>, a busybox container that printed nothing started, and the fix looked verified. Scenario 08 now runs a small realistic app that logs <code>FATAL: API_URL not set</code> and exits 1 when its config is missing. Case 17 scripts an AI that makes exactly that change and expects verify to fail through the log check. Case 05 (a silent busybox app) expects verified with warnings and no_signal.</p>
 
 <h3>Proposal shown to the user</h3>
 <pre><code>Proposed fix 3   source: deterministic rule probe-port-mismatch   confidence: high
@@ -522,18 +525,18 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
 </ul>
 
 <h2 id="audit">10. Audit event schema</h2>
-<p><em>Status: proposal, not implemented yet.</em> Today each event in <code>audit.jsonl</code> carries <code>ts</code> and <code>event</code> plus its own fields. Fix events reuse the fix record (<code>n</code>, <code>source</code>, <code>rule</code>, <code>target</code> as a <code>Kind/name</code> string, <code>summary</code>, <code>patch_type</code>, <code>patch</code>, <code>decision</code>, <code>applied</code>, <code>verified</code>, <code>status</code>), while <code>kubectl</code>, <code>rule_check</code>, <code>llm_task</code>, <code>llm_call</code>, <code>policy_check</code>, and <code>session_end</code> each have different fields. That works for reading one session but makes it hard to query across sessions or to add new checks consistently. The proposal is one envelope for every event.</p>
+<p><em>Status: implemented as schema version 1</em> (<code>src/kubeagt/audit.py</code>). In version 0 each event in <code>audit.jsonl</code> carried <code>ts</code> and <code>event</code> plus its own fields, with fix events reusing the fix record and every other event using different fields. That worked for reading one session but made it hard to query across sessions or to add new checks consistently. Version 1 puts one envelope on every event. CloudEvents and OpenTelemetry naming stay on the roadmap.</p>
 
 <h3>Envelope</h3>
 <table>
 <tr><th>Field</th><th>Type</th><th>Meaning</th></tr>
 <tr><td><code>schema_version</code></td><td>int</td><td>Starts at 1. Bumped on any incompatible change.</td></tr>
 <tr><td><code>ts</code></td><td>string</td><td>ISO 8601 time with offset, as today.</td></tr>
-<tr><td><code>session_id</code></td><td>string</td><td>The session directory name, for example <code>20261028-203000</code>.</td></tr>
+<tr><td><code>session_id</code></td><td>string</td><td>The session directory name, for example <code>20261028-203000</code>. Evals use <code>eval-</code> plus the scenario name.</td></tr>
 <tr><td><code>seq</code></td><td>int</td><td>Event number within the session, starting at 1, so order never depends on timestamps.</td></tr>
 <tr><td><code>event</code></td><td>string</td><td>Event name (see the mapping table).</td></tr>
-<tr><td><code>fix_n</code></td><td>int or absent</td><td>The proposal number when the event belongs to a proposal (today's <code>n</code>).</td></tr>
-<tr><td><code>target</code></td><td>object or absent</td><td><code>{kind, name, namespace}</code> of the object the event is about.</td></tr>
+<tr><td><code>fix_n</code></td><td>int or null</td><td>The proposal number when the event belongs to a proposal (version 0 <code>n</code>).</td></tr>
+<tr><td><code>target</code></td><td>object or null</td><td><code>{kind, name, namespace}</code> of the object the event is about.</td></tr>
 <tr><td><code>actor</code></td><td>string</td><td>Who acted: <code>rules</code>, <code>ai</code>, <code>user</code>, or <code>kubeagt</code>.</td></tr>
 <tr><td><code>outcome</code></td><td>string</td><td><code>ok</code>, <code>fail</code>, <code>warn</code>, <code>block</code>, <code>skip</code>, or <code>n/a</code>.</td></tr>
 <tr><td><code>reason</code></td><td>string</td><td>One short plain sentence, redacted. Empty when <code>outcome</code> is <code>ok</code>.</td></tr>
@@ -547,7 +550,7 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
 <p><code>evidence</code> is a list of redacted strings, capped at 10 entries of 300 characters each.</p>
 
 <h3>Verify as one event</h3>
-<p>Verify becomes a single <code>fix_verify</code> event. Its <code>detail.checks</code> lists the sub-checks in order (rollout, rule re-check, log check) and <code>detail.result</code> is <code>verified</code>, <code>verified_with_warnings</code>, or <code>failed</code>. The envelope <code>outcome</code> is <code>ok</code>, <code>warn</code>, or <code>fail</code> to match.</p>
+<p>Verify is a single <code>fix_verify</code> event, written after a separate <code>log_check</code> event. Its <code>detail.checks</code> lists the sub-checks in the order they run (rollout check, log check, rule re-check) and <code>detail.result</code> is <code>verified</code>, <code>verified_with_warnings</code>, or <code>failed</code>. The envelope <code>outcome</code> is <code>ok</code>, <code>warn</code>, or <code>fail</code> to match.</p>
 <p>A log check that found new error lines:</p>
 <pre><code>{"schema_version": 1, "ts": "2026-10-28T20:31:12-0700", "session_id": "20261028-203000", "seq": 87,
  "event": "log_check", "fix_n": 2,
@@ -565,21 +568,22 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
  "detail": {"result": "verified_with_warnings",
             "checks": [
               {"check": "rollout_check", "outcome": "ok", "reason": "", "evidence": [], "secs": 12.1},
-              {"check": "rule_recheck", "outcome": "ok", "reason": "", "evidence": [], "secs": 0.9},
               {"check": "log_check", "outcome": "warn", "reason": "2 new error-level lines after the rollout",
                "evidence": ["ERROR cache warmup timed out, continuing without cache",
-                            "ERROR retrying connection to redis:6379 (attempt 2)"], "secs": 30.4}]}}</code></pre>
+                            "ERROR retrying connection to redis:6379 (attempt 2)"], "secs": 30.4},
+              {"check": "rule_recheck", "outcome": "ok", "reason": "", "evidence": [], "secs": 0.9}]}}</code></pre>
+<p>Each event's <code>detail</code> also keeps the fix record fields (source, rule, summary, patch type, patch, decision, applied, verified, status) so one line is enough to understand the proposal. A log check with no output has outcome <code>warn</code>, reason "no log output; cannot confirm app health from logs", and <code>detail.no_signal</code> true.</p>
 
-<h3>Mapping from today's events</h3>
+<h3>Mapping from version 0 events</h3>
 <table>
-<tr><th>Today</th><th>Proposed</th><th>Notes</th></tr>
+<tr><th>Version 0</th><th>Version 1</th><th>Notes</th></tr>
 <tr><td><code>session_start</code></td><td><code>session_start</code></td><td>actor kubeagt; detail holds namespace, context, LLM name, <code>yes</code>, version.</td></tr>
 <tr><td><code>kubectl</code></td><td><code>kubectl</code></td><td>actor kubeagt or ai (when the AI asked for the read); outcome from rc; detail holds path, argv, rc, secs.</td></tr>
-<tr><td><code>rule_check</code></td><td><code>rule_check</code></td><td>actor rules; detail holds the root-cause keys and whether it is the final report check.</td></tr>
+<tr><td><code>rule_check</code></td><td><code>rule_check</code></td><td>actor rules; outcome fail when root causes remain, else ok; detail holds the root-cause keys and whether it is the final report check.</td></tr>
 <tr><td><code>llm_task</code></td><td><code>llm_task</code></td><td>actor kubeagt; detail holds the finding and candidate keys sent to the AI.</td></tr>
 <tr><td><code>llm_call</code>, <code>llm_error</code></td><td><code>llm_call</code></td><td>actor ai; outcome ok or fail; detail holds step, model, usage, cost, redacted content.</td></tr>
 <tr><td><code>policy_check</code></td><td><code>policy_check</code></td><td>actor kubeagt; check result shape.</td></tr>
-<tr><td><code>fix_invalid</code></td><td><code>dry_run</code></td><td>Recorded for every proposal, not only rejected ones; outcome ok or fail.</td></tr>
+<tr><td><code>fix_invalid</code></td><td><code>dry_run</code></td><td>Recorded for every proposal that passes the policy check, not only rejected ones; outcome ok or fail (skip when dry runs are off).</td></tr>
 <tr><td><code>fix_blocked</code></td><td><code>policy_check</code> with outcome block</td><td>No separate event needed.</td></tr>
 <tr><td><code>fix_repeat</code></td><td><code>proposal</code> with outcome block</td><td>reason says it repeats a patch already tried.</td></tr>
 <tr><td>(part of <code>decision</code>)</td><td><code>proposal</code></td><td>actor rules or ai; detail holds summary, patch type, patch, rule.</td></tr>
@@ -587,14 +591,15 @@ Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
 <tr><td><code>decision</code></td><td><code>decision</code></td><td>actor user (or kubeagt under <code>--yes</code>); outcome ok for yes, fail for no, skip for skip, n/a for quit; detail.answer holds the answer.</td></tr>
 <tr><td><code>fix_applied</code>, <code>fix_apply_failed</code></td><td><code>fix_apply</code></td><td>outcome ok or fail.</td></tr>
 <tr><td><code>fix_verified</code>, <code>fix_verify_failed</code></td><td><code>fix_verify</code></td><td>One event with sub-checks; adds the verified with warnings result.</td></tr>
+<tr><td>(new)</td><td><code>log_check</code></td><td>Check result shape plus pods, lines seen, new lines, fetch errors, no_signal, window.</td></tr>
 <tr><td><code>session_end</code></td><td><code>session_end</code></td><td>outcome ok if healthy; detail holds problems, stopped, skipped, open findings, fix summary, secs.</td></tr>
 </table>
 
 <h3>Migration</h3>
 <ul>
-  <li>Add <code>schema_version</code> to every event. Lines without it are version 0, today's format.</li>
-  <li>Keep readers (the eval checker, tests, and any scripts) able to read version 0 files, so old sessions and eval outputs stay readable. During the switch, the old event names can be written alongside the new ones for one release.</li>
-  <li>The README and <code>docs/test-plan.md</code> should point to this section as the audit format, and the eval checks should move to the new names once it ships.</li>
+  <li>Every event now carries <code>schema_version</code> 1. Lines without it are version 0.</li>
+  <li><code>read_events()</code> reads both versions and upgrades version 0 lines with the mapping above, so old sessions and eval outputs stay readable. kubeagt writes only version 1; it does not write the old names alongside the new ones.</li>
+  <li>The eval checks use the new names. Event counts in scenario files can name an outcome, for example <code>"prompt:warn": 2</code> or <code>"fix_apply:ok": 1</code>.</li>
 </ul>
 
 </main>
