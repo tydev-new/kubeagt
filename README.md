@@ -36,32 +36,37 @@ investigate with read-only kubectl tools, then proposes a single fix with the di
 an exact diff, and the reasoning. Nothing changes until you answer `y`. After each change kubeagt waits
 for the rollout, checks the logs, re-checks the namespace, and feeds the new state into the next proposal.
 
-## Install
+## Getting started
 
-Python 3.9 or newer and `kubectl` on your PATH.
+You need Python 3.9 or newer and `kubectl` on your PATH. The only runtime dependency is PyYAML.
 
-```bash
-pip install git+https://github.com/tydev-new/kubeagt
-kubeagt --version
-```
+### 1. Try it on a test cluster with the bundled broken cases
 
-For development:
+No API key and no real cluster needed. Create a throwaway [kind](https://kind.sigs.k8s.io/) cluster,
+load one of the bundled broken scenarios, and let kubeagt find and fix it.
 
 ```bash
 git clone https://github.com/tydev-new/kubeagt.git && cd kubeagt
-python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-pytest -q
+pip install .
+kind create cluster --name kubeagt-test
+
+# the combined Redis case: three bugs in one Deployment
+kubectl --context kind-kubeagt-test create namespace redis-demo
+kubectl --context kind-kubeagt-test -n redis-demo apply -f scenarios/04-redis-combined/manifest.yaml
+kubeagt check --context kind-kubeagt-test -n redis-demo            # read-only findings
+kubeagt fix   --context kind-kubeagt-test -n redis-demo --llm none # rules only, answer y/n/s/q
+
+# or run every bundled case and get a scorecard
+kubeagt eval --context kind-kubeagt-test --out eval-results
 ```
 
-The only runtime dependency is PyYAML. HTTP calls to the LLM use the Python standard library.
+`kubeagt eval` only touches `kubeagt-eval-*` namespaces it creates. Delete the cluster with
+`kind delete cluster --name kubeagt-test` when you are done.
 
-## Try it in your Grok Bot
-
-You can run the whole thing inside your own Grok Bot, with no API key: the bot sets up a throwaway
-kind cluster on its own computer, runs kubeagt in relay mode, and plays the model itself (see
-[Relay mode](#relay-mode-a-human-or-another-agent-plays-the-model)). The audit log labels these runs
-`relay (human/agent answered, not Grok)`. Paste this prompt into your bot:
+**Or try it inside your own Grok Bot**, with no API key: the bot sets up the kind cluster on its own
+computer, runs kubeagt in [relay mode](#relay-mode-a-human-or-another-agent-plays-the-model), and plays
+the model itself. The audit log labels these runs `relay (human/agent answered, not Grok)`. Paste this
+prompt into your bot:
 
 ```text
 Install kubeagt from https://github.com/tydev-new/kubeagt (pip install git+https://github.com/tydev-new/kubeagt).
@@ -76,8 +81,34 @@ evidence, and the diff, and wait for my y, n, s, or q. Send exactly my answer. A
 verify results and the audit log summary, then delete the kind cluster when I say so.
 ```
 
-To use a real model instead, give the bot your OpenRouter key and drop `--llm relay` (see
-[LLM provider](#llm-provider)).
+
+### 2. Install for real
+
+```bash
+pip install git+https://github.com/tydev-new/kubeagt
+kubeagt --version
+
+kubeagt check --context <your-context> -n <namespace>   # read-only, start here
+kubeagt fix   --context <your-context> -n <namespace>   # one fix at a time, only after your y
+```
+
+kubeagt always prints the context it is acting on. With no key set it runs rules only. For
+development: `pip install -e ".[dev]" && pytest -q` in a clone.
+
+### 3. Run with Grok (or another model)
+
+Bring your own [OpenRouter key](https://openrouter.ai/settings/keys). The default model is Grok 4.7.
+
+```bash
+export OPENROUTER_API_KEY=...
+kubeagt fix --context <your-context> -n <namespace>                     # x-ai/grok-4.7
+kubeagt fix --context <your-context> -n <namespace> \
+  --llm-model deepseek/deepseek-v4.1-flash-1017                         # any OpenRouter model
+```
+
+`KUBEAGT_LLM_MODEL` sets the model too. The default caps are 12 steps per investigation, 200,000 tokens, and $0.50
+per session. xAI direct, OpenAI, and local models (Ollama, vLLM) are in [LLM provider](#llm-provider) and
+[On-prem and air-gapped clusters](#on-prem-and-air-gapped-clusters).
 
 ## Usage
 
