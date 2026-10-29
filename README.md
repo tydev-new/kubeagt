@@ -15,9 +15,9 @@
 | Eval (kind cluster, 2026-10-28) | Result |
 |---|---|
 | 9 scenarios (8 broken, including 3 bugs in one Redis Deployment, plus a healthy control), live Grok 4.7, before the log check | 8/9, $0.1698 total |
-| Same 9 plus case 17, live DeepSeek v4.1 Flash, after the log check | 9/10, $0.0130 total |
-| Rules only, 10 scenario cases and 7 human-answer cases | 17/17 |
-| Mock AI, same 17 cases | 16/17 first pass; the miss was a stale namespace timeout, 05 passed on rerun |
+| Same 9 plus case 17, live DeepSeek v4.1 Flash, after the log check (08 before its value check) | 9/10, $0.0130 total |
+| Rules only, 10 scenario cases and 7 human-answer cases, with the tool error loop | 17/17 |
+| Mock AI, same 17 cases, with the tool error loop | 17/17 |
 
 The honest miss is `08-missing-configmap`. With a missing ConfigMap, both models first tried to hide the error
 by marking it `optional: true`; a log check after every fix now catches that (case 17). In later reruns DeepSeek
@@ -29,8 +29,6 @@ Roadmap and known limitations: [ROADMAP.md](ROADMAP.md).
 
 ## How it works
 
-kubeagt, short for kube agent, named like kubectl.
-
 kubeagt collects a redacted snapshot, runs deterministic checks, optionally lets an LLM (Grok via OpenRouter by default)
 investigate with read-only kubectl tools, then proposes a single fix with the diagnosis, the evidence,
 an exact diff, and the reasoning. Nothing changes until you answer `y`. After each change kubeagt waits
@@ -38,11 +36,16 @@ for the rollout, checks the logs, re-checks the namespace, and feeds the new sta
 
 ## Getting started
 
-Three ways in. Steps 1 and 2 run on a Linux machine with your own [OpenRouter key](https://openrouter.ai/settings/keys),
-Python 3.9 or newer, and `kubectl` on your PATH (the only runtime dependency is PyYAML). Step 3 is the
-easiest: it runs inside your own Grok Bot and needs no key.
+| Path | For | Runs on | Cluster | Model and key |
+|---|---|---|---|---|
+| [1](#1-test-on-linux-with-a-bundled-test-cluster) | Test | Linux | throwaway kind cluster with bundled broken cases | OpenRouter key (Grok by default) |
+| [2](#2-use-it-for-real-on-linux) | Real use | Linux | your cluster | OpenRouter key (Grok by default) |
+| [3](#3-easiest-test-it-in-grok-bot) | Easiest test | your Grok Bot | throwaway kind cluster on the bot's computer | none, the bot plays the model |
+| [4](#4-on-prem-or-air-gapped-run-a-local-model) | On-prem or air-gapped | Linux | your cluster or kind | local model (Ollama, vLLM), no key |
 
-### 1. Try it on a test cluster with the bundled broken cases (Linux, OpenRouter key)
+Paths 1, 2, and 4 need Python 3.9 or newer and `kubectl` on your PATH; the only runtime dependency is PyYAML.
+
+### 1. Test on Linux with a bundled test cluster
 
 No real cluster needed. On a Linux machine with Docker and [kind](https://kind.sigs.k8s.io/), create a
 throwaway cluster, load one of the bundled broken scenarios, and let kubeagt find and fix it.
@@ -68,33 +71,24 @@ Without a key, `--llm none` runs the same loop with the deterministic rules only
 `kubeagt eval` only touches `kubeagt-eval-*` namespaces it creates. Delete the cluster with
 `kind delete cluster --name kubeagt-test` when you are done.
 
-### 2. Install for real (Linux, OpenRouter key)
+### 2. Use it for real on Linux
 
 ```bash
 pip install git+https://github.com/tydev-new/kubeagt
-kubeagt --version
-
+export OPENROUTER_API_KEY=...                            # https://openrouter.ai/settings/keys
 kubeagt check --context <your-context> -n <namespace>   # read-only, start here
-kubeagt fix   --context <your-context> -n <namespace>   # one fix at a time, only after your y
+kubeagt fix   --context <your-context> -n <namespace>   # Grok 4.7 by default, one fix at a time, only after your y
+kubeagt fix   --context <your-context> -n <namespace> --llm-model deepseek/deepseek-v4.1-flash-1017   # any OpenRouter model
 ```
 
 kubeagt always prints the context it is acting on. With no key set it runs rules only. For
 development: `pip install -e ".[dev]" && pytest -q` in a clone.
 
-**With an AI model.** Bring your own [OpenRouter key](https://openrouter.ai/settings/keys). The default model is Grok 4.7.
-
-```bash
-export OPENROUTER_API_KEY=...
-kubeagt fix --context <your-context> -n <namespace>                     # x-ai/grok-4.7
-kubeagt fix --context <your-context> -n <namespace> \
-  --llm-model deepseek/deepseek-v4.1-flash-1017                         # any OpenRouter model
-```
-
 `KUBEAGT_LLM_MODEL` sets the model too. The default caps are 12 steps per investigation, 200,000 tokens, and $0.50
 per session. xAI direct, OpenAI, and local models (Ollama, vLLM) are in [LLM provider](#llm-provider) and
 [On-prem and air-gapped clusters](#on-prem-and-air-gapped-clusters).
 
-### 3. Try it with Grok Bot (easiest, no key needed)
+### 3. Easiest: test it in Grok Bot
 
 Your own Grok Bot can run the whole thing: it sets up the kind cluster on its own computer, runs
 kubeagt in [relay mode](#relay-mode-a-human-or-another-agent-plays-the-model), and plays the model
@@ -114,7 +108,25 @@ evidence, and the diff, and wait for my y, n, s, or q. Send exactly my answer. A
 verify results and the audit log summary, then delete the kind cluster when I say so.
 ```
 
+### 4. On-prem or air-gapped: run a local model
+
+Point kubeagt at a model server inside your network (Ollama, vLLM, or any OpenAI-compatible endpoint
+with tool calling). Nothing leaves the network and no key is needed.
+
+```bash
+export KUBEAGT_LLM_API_KEY=unused KUBEAGT_PRICE_IN_PER_MTOK=0 KUBEAGT_PRICE_OUT_PER_MTOK=0
+kubeagt fix --context <your-context> -n <namespace> --llm live --llm-provider custom \
+  --llm-base-url http://127.0.0.1:11434/v1 --llm-model <model>     # Ollama
+```
+
+We tested this for real with small Qwen2.5 models on a CPU-only box: 0.5B fixed the nodeSelector
+case, but 0.5B and 1.5B could not handle the missing ConfigMap, and kubeagt refused their malformed
+patches before you would see them. Small models do not investigate, so use a capable open-weights
+model for real work. Details in [On-prem and air-gapped clusters](#on-prem-and-air-gapped-clusters).
+
 ## Usage
+
+Pick a path from [Getting started](#getting-started) first. This section is the command reference.
 
 All commands accept `--kubeconfig`, `--context`, and `-n/--namespace`. kubeagt uses kubectl's own
 defaults when you leave them out, and it always prints the context it is acting on.
@@ -172,7 +184,8 @@ to the root cause on the same workload, so you see one problem instead of five.
 
 ## LLM provider
 
-kubeagt works with no LLM at all: the deterministic rules detect and fix every bundled scenario.
+kubeagt works with no LLM at all: the deterministic rules detect every bundled scenario and fix every one
+that has a safe fix (08 is detected and deliberately left for a human).
 With an LLM, the model leads each round. It sees the rule findings and candidate fixes, runs its own
 read-only kubectl commands, and proposes one fix (it may accept a candidate or propose a better one).
 
@@ -188,7 +201,7 @@ kubeagt fix -n shop                 # --llm auto (default) uses OpenRouter when 
 The default model slug is `x-ai/grok-4.7` (Grok 4.7 as listed on OpenRouter in October 2026).
 Model slugs change often: check OpenRouter's current model list
 ([openrouter.ai/models?q=grok](https://openrouter.ai/models?q=grok)) for the exact slug you want and
-set it with `--llm-model` or `KUBEAGT_LLM_MODEL`, for example `KUBEAGT_LLM_MODEL=x-ai/grok-4.6`.
+set it with `--llm-model` or `KUBEAGT_LLM_MODEL`, for example `KUBEAGT_LLM_MODEL=deepseek/deepseek-v4.1-flash-1017`.
 
 | Setting | Flag | Environment | Default |
 |---|---|---|---|
@@ -319,13 +332,14 @@ kubeagt fix -n shop --llm relay --relay-dir /tmp/kubeagt-relay
    Service, ConfigMap, PVC) and the LLM has no tool that calls it.
 2. **The LLM only proposes.** Its `propose_fix` tool returns data to kubeagt. kubeagt validates the patch with
    a server-side dry run, shows you the resulting diff, and applies it only if you say yes.
-3. **One change at a time,** each verified with a rollout check and a fresh round of rules. A failed
-   verification is fed back into the next round.
+3. **One change at a time,** each verified with a rollout check, a log check, and a fresh round of rules.
+   A failed verification is fed back into the next round.
 4. **Redaction everywhere.** Secret values are never read (only names and key names). Sensitive env
    values, token-like strings, bearer headers, private keys, and JWTs are masked in bundles, LLM tool
    output, and the audit log. `last-applied-configuration` annotations are dropped.
 5. **Caps.** Turn, token, and estimated spend caps bound every LLM session. `--max-fixes` (default 10)
-   caps applied fixes; a separate guard stops after 3x that many proposals (at least 10).
+   caps applied fixes; a separate guard stops after 3x that many proposals (at least 10). Inside an
+   investigation, tool errors have their own small loop: a nudge after 3 failures in a row, a stop after 5.
 6. **Audit log.** Every kubectl command (read, dry run, write, verify), every LLM call, every decision,
    and every result is one JSON line in the session's `audit.jsonl`.
 7. **Evals are fenced.** `kubeagt eval` refuses to run unless you pass `--context` or `--kubeconfig`
@@ -354,6 +368,8 @@ be healthy afterwards.
 | 06-service-selector | Service selects `app=redis-cache`, pods are `app=redis` |
 | 07-crashloop-bad-command | command override `redis-srv` (typo) |
 | 08-missing-configmap | `envFrom` a ConfigMap that does not exist; the app checks `API_URL` against a real upstream; must be detected and must not be "fixed" |
+| 17-ai-hides-missing-config | same as 08, with a scripted AI fix that marks the ConfigMap `optional: true`; verify must fail it |
+| 18-ai-invents-config-value | same as 08, with a scripted AI fix that hardcodes a made-up `API_URL`; verify must fail it |
 
 Human response cases feed a scripted answer sequence to the real fix prompt (an `answers:` list in
 `expected.yaml`; when it runs out the prompt sees end of input, like Ctrl-D). Each checks the cluster
@@ -400,7 +416,7 @@ one-shot LLM explanation of what they find. kubeagt builds on the same idea and 
 
 - an **agent loop**: the model gathers its own evidence with allowlisted read-only tools, under step and spend caps;
 - **gated fixes**: one concrete patch at a time, with diff, evidence, and reasoning, applied only on approval;
-- **verification**: rollout and re-check after every change, with failures fed back into the next round;
+- **verification**: rollout, log check, and re-check after every change, with failures fed back into the next round;
 - **offline bundles**: collect once, analyze anywhere, with secrets redacted;
 - **evals**: reproducible broken scenarios on kind with a scorecard, so changes to rules or prompts are measured.
 
