@@ -42,6 +42,9 @@ in usage.cost.
 Totals tonight: rules-only 10/10, mock 9/10 on the first pass (10/10 with the 05 rerun), live
 DeepSeek 9/10 (8/9 on scenarios 00 to 08). Earlier: live Grok 8/9, live DeepSeek 8/9.
 
+After the inner tool-error loop landed (eval-rules5 and eval-mock5): rules-only 17/17 and mock 17/17
+(10/10 scenario cases, 7/7 human-answer cases), verify results unchanged from the table above.
+
 | Live run | Passed | Steps (sum) | Tokens | Total cost | Time (sum of cases) |
 |---|---|---|---|---|---|
 | deepseek/deepseek-v4.1-flash-1017, tonight | 9/10 | 53 | 91,158 | $0.0130 | 656.7 s |
@@ -103,7 +106,7 @@ Totals: rules-only 7/7, mock 7/7 (tonight, with the v1 audit event names; also 7
 
 ## Table 3: unit test groups
 
-`pytest -q`, run against a fake cluster and scripted AI. 164 tests pass.
+`pytest -q`, run against a fake cluster and scripted AI. 181 tests pass.
 
 | Group | What it covers | Count |
 |---|---|---|
@@ -111,6 +114,7 @@ Totals: rules-only 7/7, mock 7/7 (tonight, with the v1 audit event names; also 7
 | test_agent_llm | Agent loop, caps on steps, tokens and spend, mock provider, OpenAI-compatible client, provider presets | 20 |
 | test_rules | Each deterministic rule on good and broken objects | 19 |
 | test_logcheck | Log check: pass, warn on new errors, fail on fatal, missing config, restarts and exits; no_signal for silent pods or no pods; fetch errors; pre-existing errors ignored; several containers; redaction and caps; large logs; skip; Service selector read after the fix; verify results in the fix loop; scenario 17 expectations | 19 |
+| test_tool_loop | Inner tool-error loop: nudge after 3 failed kubectl calls in a row, stop after 5 with an llm_task fail event, reset on success, exact repeat of a failed call refused and counted, repeat allowed after a success, 5 tool calls per turn, executed calls count toward the step budget; empty diagnosis or reasoning rejected; finish_reason length recorded; empty or malformed API responses raise LLMError | 17 |
 | test_audit_schema | v1 envelope on every event type, seq and session_id, shared check shape, evidence caps, seq continues on append, v0 files readable | 6 |
 | test_fixer | Fix loop: one fix at a time, y, n, s, q, AI feedback, repeat blocking, verification, caps | 18 |
 | test_human_responses | Every prompt answer (y, n, s, q, invalid, end of input, mixed) with audit checks, eval checker, pre-case check | 17 |
