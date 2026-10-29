@@ -1,0 +1,14 @@
+description: Human answers y. The nodeSelector fix on Deployment/worker is applied and verified.
+steps:
+  - {apply: ../01-nodeselector/manifest.yaml}
+settle_seconds: 15
+answers: ["y"]
+expected_findings: [nodeselector-no-match]
+expected_fixes:
+  - target: Deployment/worker
+    checks:
+      - {path: spec.template.spec.nodeSelector, absent: true}
+expect:
+  decisions: ["yes"]
+  events: {fix_applied: 1, fix_verified: 1, prompt_invalid: 0, prompt_eof: 0}
+expect_healthy: true

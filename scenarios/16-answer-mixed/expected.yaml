@@ -1,0 +1,21 @@
+description: >-
+  Three-bug Redis case answered n, y, s, y. The nodeSelector fix is declined and never offered again,
+  memory is fixed, the probe finding is skipped, so the last y is never asked for.
+steps:
+  - {apply: ../04-redis-combined/manifest.yaml}
+settle_seconds: 15
+answers: ["n", "y", "s", "y"]
+expected_findings: [nodeselector-no-match, probe-port-mismatch, memory-too-small]
+expected_fixes:
+  - target: Deployment/redis
+    checks:
+      - {path: spec.template.spec.nodeSelector.redisnode, equals: "true"}
+      - {path: "spec.template.spec.containers[0].resources.requests.memory", equals: 128Mi}
+      - {path: "spec.template.spec.containers[0].resources.limits.memory", equals: 512Mi}
+      - {path: "spec.template.spec.containers[0].readinessProbe.tcpSocket.port", equals: 5432}
+expect:
+  decisions: ["no", "yes", "skip"]
+  events: {fix_applied: 1, prompt_eof: 0}
+  open: [nodeselector-no-match, probe-port-mismatch]
+  stopped: no fix available
+expect_healthy: false

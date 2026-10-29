@@ -213,6 +213,12 @@ def cmd_eval(a) -> int:
                 else RELAY_NAME if a.llm == "relay"
                 else f"{a.llm} ({cfg.provider}, {cfg.model})") if a.llm != "auto" else ("auto (" + ("key set" if cfg.api_key() else "no key, rules only") + ")")
     print(f"kubeagt eval: {len(scen)} scenario(s) on context {ctx}, LLM mode {llm_desc}")
+    from .evals import Harness
+    try:
+        opt.node_baseline = Harness(KubeTarget("", a.context, opt.kubeconfig), print).node_labels()
+    except Exception as e:
+        print(f"could not read node labels for the preflight baseline: {e}", file=sys.stderr)
+        return 2
     out = Path(a.out)
     results = []
     for s in scen:

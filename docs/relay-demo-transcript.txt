@@ -1,5 +1,5 @@
 LLM: relay (human/agent answered, not Grok); relay dir /tmp/kubeagt-relay
-kubeagt: namespace kubeagt-relay-demo, context kind-kdiag-test
+kubeagt: namespace kubeagt-relay-demo, context kind-kubeagt-test
 Found 3 problem(s) and 3 related symptom(s):
   [critical] Deployment/redis: nodeSelector redisnode=true matches no node
   [warning] Deployment/redis container redis: memory limit 5Mi is far too small
@@ -19,16 +19,16 @@ relay: wrote /tmp/kubeagt-relay/req-3.json; waiting up to 900s for /tmp/kubeagt-
 
 ==============================================================================
 Proposed fix 1   source: LLM (relay (human/agent answered, not Grok)), addresses rule nodeselector-no-match   confidence: medium
-Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kdiag-test
+Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kubeagt-test
 Problem:   nodeSelector redisnode=true matches no node
 Diagnosis: The redis pod has been Pending since creation because its nodeSelector redisnode=true
-           matches no node. The cluster has a single node (kdiag-test-control-plane), it does not
+           matches no node. The cluster has a single node (kubeagt-test-control-plane), it does not
            carry that label, and it has no taints, so the selector is the only thing keeping the pod
            off it.
 Evidence:
   - describe pod: Node-Selectors: redisnode=true; PodScheduled False
   - FailedScheduling: 0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector
-  - get nodes --show-labels: kdiag-test-control-plane has no redisnode label
+  - get nodes --show-labels: kubeagt-test-control-plane has no redisnode label
   - node taints: none; Deployment has no affinity, only nodeSelector {"redisnode":"true"}
 Change:    remove nodeSelector redisnode=true so the pod can schedule on the only node
     --- Deployment/redis (current)
@@ -60,7 +60,7 @@ relay: wrote /tmp/kubeagt-relay/req-5.json; waiting up to 900s for /tmp/kubeagt-
 
 ==============================================================================
 Proposed fix 2   source: LLM (relay (human/agent answered, not Grok)), addresses rule probe-port-mismatch   confidence: medium
-Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kdiag-test
+Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kubeagt-test
 Problem:   readinessProbe checks port 5432 but the container listens on 6379
 Diagnosis: After the scheduling fix the new pod redis-79c848ccd5-q7qzf is Running but never Ready:
            its readiness probe connects to TCP 5432, where nothing listens. Redis itself started
@@ -96,7 +96,7 @@ relay: wrote /tmp/kubeagt-relay/req-7.json; waiting up to 900s for /tmp/kubeagt-
 
 ==============================================================================
 Proposed fix 3   source: LLM (relay (human/agent answered, not Grok)), addresses rule memory-too-small   confidence: medium
-Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kdiag-test
+Target:    Deployment/redis   namespace: kubeagt-relay-demo   context: kind-kubeagt-test
 Problem:   memory limit 5Mi is far too small
 Diagnosis: Redis is Ready now, but its memory request and limit are both 5Mi. It survives only
            because it is idle: it has not been OOM-killed yet (restarts=0), but it runs with the
@@ -247,11 +247,11 @@ Files: /workspace/relay-run/relay/req-N.json and resp-N.json; audit: /workspace/
       }
      ],
      "change": "remove nodeSelector redisnode=true so the pod can schedule on the only node",
-     "diagnosis": "The redis pod has been Pending since creation because its nodeSelector redisnode=true matches no node. The cluster has a single node (kdiag-test-control-plane), it does not carry that label, and it has no taints, so the selector is the only thing keeping the pod off it.",
+     "diagnosis": "The redis pod has been Pending since creation because its nodeSelector redisnode=true matches no node. The cluster has a single node (kubeagt-test-control-plane), it does not carry that label, and it has no taints, so the selector is the only thing keeping the pod off it.",
      "evidence": [
       "describe pod: Node-Selectors: redisnode=true; PodScheduled False",
       "FailedScheduling: 0/1 nodes are available: 1 node(s) didn't match Pod's node affinity/selector",
-      "get nodes --show-labels: kdiag-test-control-plane has no redisnode label",
+      "get nodes --show-labels: kubeagt-test-control-plane has no redisnode label",
       "node taints: none; Deployment has no affinity, only nodeSelector {\"redisnode\":\"true\"}"
      ],
      "reasoning": "Removing the selector is the smallest change kubeagt can make within the namespace and lets the pod schedule on the untainted node. Labeling the node instead would also work but is a cluster-level change outside the allowed patch kinds; a human can do that later if Redis really should be pinned. The 5Mi memory limit and the readiness probe on 5432 still need separate fixes once the pod is running.",

@@ -1,0 +1,13 @@
+description: Human answers n. Nothing is applied, the same patch is never offered again, rules are not re-run.
+steps:
+  - {apply: ../01-nodeselector/manifest.yaml}
+settle_seconds: 15
+answers: ["n", "y"]
+expected_findings: [nodeselector-no-match]
+unchanged: [Deployment/worker]
+expect:
+  decisions: ["no"]
+  events: {fix_applied: 0, rule_check: 1, prompt_eof: 0}
+  open: [nodeselector-no-match]
+  stopped: no fix available
+expect_healthy: false

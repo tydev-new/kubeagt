@@ -54,3 +54,13 @@ def test_cli_provider_flag_builds_config():
     a = build_parser().parse_args(["fix", "--llm-provider", "xai", "--llm-model", "grok-x"])
     cfg = _cfg(a)
     assert (cfg.provider, cfg.base_url, cfg.api_key_env, cfg.model) == ("xai", "https://api.x.ai/v1", "XAI_API_KEY", "grok-x")
+
+
+def test_every_scenario_step_file_exists_and_human_cases_are_well_formed():
+    import yaml
+    for s in list_scenarios(default_scenarios_dir()):
+        spec = yaml.safe_load((s / "expected.yaml").read_text())
+        for st in spec.get("steps", []):
+            assert (s / st["apply"]).is_file(), f"{s.name}: {st['apply']} missing"
+        if "answers" in spec:
+            assert isinstance(spec["answers"], list) and "decisions" in spec.get("expect", {}), s.name

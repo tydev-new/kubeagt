@@ -1,0 +1,20 @@
+description: On the three-bug Redis case the human answers y, then q. Only the first fix lands; nothing changes after q.
+steps:
+  - {apply: ../04-redis-combined/manifest.yaml}
+settle_seconds: 15
+answers: ["y", "q", "y"]
+expected_findings: [nodeselector-no-match, probe-port-mismatch, memory-too-small]
+expected_fixes:
+  - target: Deployment/redis
+    checks:
+      - {path: spec.template.spec.nodeSelector, absent: true}
+      - {path: metadata.generation, equals: 2}
+      - {path: "spec.template.spec.containers[0].readinessProbe.tcpSocket.port", equals: 5432}
+      - {path: "spec.template.spec.containers[0].resources.requests.memory", equals: 5Mi}
+      - {path: "spec.template.spec.containers[0].resources.limits.memory", equals: 5Mi}
+expect:
+  decisions: ["yes", "quit"]
+  events: {fix_applied: 1, prompt_eof: 0}
+  open: [probe-port-mismatch, memory-too-small]
+  stopped: user quit
+expect_healthy: false

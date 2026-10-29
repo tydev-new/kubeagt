@@ -58,11 +58,11 @@ def _fake_kubectl(tmp_path, stdout_text):
 
 def test_readonly_run_scopes_namespace_and_redacts(tmp_path):
     exe, log = _fake_kubectl(tmp_path, "DB_PASSWORD=hunter2 token: abcdefghijklmnop\nok\n")
-    kc = ReadOnlyKubectl(KubeTarget("demo", context="kind-kdiag-test", kubeconfig="/tmp/kc", kubectl=exe))
+    kc = ReadOnlyKubectl(KubeTarget("demo", context="kind-kubeagt-test", kubeconfig="/tmp/kc", kubectl=exe))
     out = kc.run(["get", "pods"])
     assert "hunter2" not in out and "<redacted>" in out
     argv = json.loads(log.read_text().splitlines()[0])
-    assert argv[:4] == ["--kubeconfig", "/tmp/kc", "--context", "kind-kdiag-test"]
+    assert argv[:4] == ["--kubeconfig", "/tmp/kc", "--context", "kind-kubeagt-test"]
     assert argv[-2:] == ["-n", "demo"]
     with pytest.raises(ToolRefused):
         kc.run(["delete", "pod", "x"])

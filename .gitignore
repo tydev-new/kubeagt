@@ -7,3 +7,7 @@ dist/
 kubeagt-bundle-*/
 kubeagt-bundle-*.zip
 .kubeagt/
+.env
+.env.*
+*.key
+eval-results/

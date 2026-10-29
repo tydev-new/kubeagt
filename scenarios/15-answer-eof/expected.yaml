@@ -1,0 +1,13 @@
+description: Stdin is closed at the prompt (Ctrl-D). Treated as quit; nothing is applied.
+steps:
+  - {apply: ../01-nodeselector/manifest.yaml}
+settle_seconds: 15
+answers: []
+expected_findings: [nodeselector-no-match]
+unchanged: [Deployment/worker]
+expect:
+  decisions: ["quit"]
+  events: {prompt_eof: 1, fix_applied: 0, rule_check: 1}
+  open: [nodeselector-no-match]
+  stopped: user quit
+expect_healthy: false

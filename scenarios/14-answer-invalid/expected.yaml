@@ -1,0 +1,14 @@
+description: Human types an invalid answer and an empty line, is asked again each time, then answers y.
+steps:
+  - {apply: ../01-nodeselector/manifest.yaml}
+settle_seconds: 15
+answers: ["maybe", "", "y"]
+expected_findings: [nodeselector-no-match]
+expected_fixes:
+  - target: Deployment/worker
+    checks:
+      - {path: spec.template.spec.nodeSelector, absent: true}
+expect:
+  decisions: ["yes"]
+  events: {prompt_invalid: 2, fix_applied: 1, fix_verified: 1, prompt_eof: 0}
+expect_healthy: true

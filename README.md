@@ -59,6 +59,7 @@ Answers at the prompt:
 - `n` rejects this fix. With an LLM enabled, kubeagt tells the model and it may propose a different fix.
 - `s` skips this problem for the rest of the session.
 - `q` stops immediately. Nothing else is changed.
+- Anything else asks again (up to 5 times, then quits). End of input (Ctrl-D or closed stdin) counts as `q`.
 
 `--yes` approves every fix without asking. It exists for evals; do not use it on a cluster you care about.
 
@@ -215,14 +216,33 @@ be healthy afterwards.
 | 07-crashloop-bad-command | command override `redis-srv` (typo) |
 | 08-missing-configmap | `envFrom` a ConfigMap that does not exist; must be detected and must not be "fixed" |
 
+Human response cases feed a scripted answer sequence to the real fix prompt (an `answers:` list in
+`expected.yaml`; when it runs out the prompt sees end of input, like Ctrl-D). Each checks the cluster
+objects and the audit log: the decisions recorded, nothing applied unless answered `y`, no rule re-run
+after `n` or `s`, a declined patch never offered again, a skipped finding never sent to the AI, and
+nothing written after `q`.
+
+| Case | Answers | Expected |
+|---|---|---|
+| 10-answer-yes | y | nodeSelector fix applied and verified |
+| 11-answer-no | n, y | declined, never offered again (the spare y is never asked), Deployment unchanged |
+| 12-answer-skip | s, y | finding set aside and still open at the end, Deployment unchanged |
+| 13-answer-quit | y, q, y | Redis case: first fix lands, session stops at q, the other two bugs untouched |
+| 14-answer-invalid | maybe, (empty), y | asked again twice, then applied |
+| 15-answer-eof | none | end of input treated as quit, Deployment unchanged |
+| 16-answer-mixed | n, y, s, y | Redis case: selector declined, memory fixed, probe skipped, last y never asked |
+
+Before every case the harness checks that no `kubeagt-eval-*` namespace is left over and that node
+labels still match the start of the run; if not, the case fails with the reason.
+
 Run them on a throwaway kind cluster:
 
 ```bash
-kind create cluster --name kdiag-test --config test/kind-config.yaml
-kind load docker-image redis:7.2-alpine busybox:1.36 --name kdiag-test   # optional, avoids pulls
-kubeagt eval --context kind-kdiag-test --out eval-results          # rules only
-kubeagt eval --context kind-kdiag-test --llm mock                 # exercise the agent loop without a key
-OPENROUTER_API_KEY=... kubeagt eval --context kind-kdiag-test --llm live   # real model, your account
+kind create cluster --name kubeagt-test --config test/kind-config.yaml
+kind load docker-image redis:7.2-alpine busybox:1.36 --name kubeagt-test   # optional, avoids pulls
+kubeagt eval --context kind-kubeagt-test --out eval-results          # rules only
+kubeagt eval --context kind-kubeagt-test --llm mock                 # exercise the agent loop without a key
+OPENROUTER_API_KEY=... kubeagt eval --context kind-kubeagt-test --llm live   # real model, your account
 ```
 
 The scorecard (`eval-results/scorecard.md` and `.json`) reports per scenario: detection, correct fix,
@@ -232,6 +252,7 @@ logs for each scenario are written next to it.
 ### Testing policy
 
 There is no CI workflow. All testing is manual, on a local kind cluster, using the commands above.
+The full test plan with the latest real results is in [docs/test-plan.md](docs/test-plan.md).
 
 ## How it relates to k8sgpt
 

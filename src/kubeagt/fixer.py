@@ -27,15 +27,25 @@ RULE = "=" * 78
 ANSWERS = {"y": "yes", "yes": "yes", "n": "no", "no": "no", "s": "skip", "skip": "skip", "q": "quit", "quit": "quit"}
 
 
+PROMPT = "Apply this fix? [y]es / [n]o / [s]kip / [q]uit: "
+MAX_INVALID = 5
+
+
 def tty_ask(prompt: str) -> str:
-    while True:
-        try:
-            a = input(prompt).strip().lower()
-        except EOFError:
-            return "quit"
-        if a in ANSWERS:
-            return ANSWERS[a]
-        print("  please answer y, n, s, or q")
+    """Read one raw line from the terminal. Raises EOFError on Ctrl-D or closed stdin."""
+    return input(prompt)
+
+
+def scripted_ask(answers: List[str]) -> Callable[[str], str]:
+    """Feed a fixed answer sequence to the prompt, as if typed. When the list runs out it behaves
+    like Ctrl-D (EOFError). Used by the human-response evals and tests; not exposed on the CLI."""
+    queue = list(answers)
+
+    def ask(prompt: str) -> str:
+        if not queue:
+            raise EOFError
+        return str(queue.pop(0))
+    return ask
 
 
 @dataclass
@@ -106,9 +116,28 @@ class FixSession:
         self.llm_idle_state: Optional[frozenset] = None
 
     # ------------------------------------------------------------ helpers
-    def _check(self) -> tuple:
+    def _check(self, final: bool = False) -> tuple:
         b = self.snapshot()
-        return b, run_rules(b, self.min_memory_mib)
+        found = run_rules(b, self.min_memory_mib)
+        self.audit.write("rule_check", final=final, root_causes=sorted(f.key() for f in found if f.root_cause))
+        return b, found
+
+    def _prompt(self) -> str:
+        """Ask y/n/s/q. Invalid input re-prompts (up to MAX_INVALID times); EOF or Ctrl-D means quit."""
+        for _ in range(MAX_INVALID + 1):
+            try:
+                raw = self.ask(PROMPT)
+            except EOFError:
+                self.out("  end of input: treating as quit, nothing applied")
+                self.audit.write("prompt_eof")
+                return "quit"
+            a = str(raw).strip().lower()
+            if a in ANSWERS:
+                return ANSWERS[a]
+            self.out("  please answer y, n, s, or q")
+            self.audit.write("prompt_invalid", answer=redact_text(str(raw))[:40])
+        self.out("  too many invalid answers: treating as quit")
+        return "quit"
 
     def _dry_run(self, fix: Fix):
         """One server-side dry run per proposal; later callers reuse the result."""
@@ -185,6 +214,8 @@ class FixSession:
             # Ask the AI? yes when configured and the open errors changed since it last had nothing new.
             if self.llm is not None and state != self.llm_idle_state:
                 self.out(f"\nInvestigating with LLM ({getattr(self.llm, 'name', 'llm')}), read-only tools only...")
+                self.audit.write("llm_task", findings=sorted(f.key() for f in self._open(findings) if f.root_cause),
+                                 candidates=sorted(f.key() for f in cands))
                 inv = Investigator(self.llm, self.kc, self.audit, self.budget, self.llm_cfg, log=self.out)
                 res = inv.investigate(self._llm_task(self._open(findings), cands))
                 rep.tool_steps += res.tool_steps
@@ -231,10 +262,9 @@ class FixSession:
                 rep.fixes.append(rec)
                 continue                                       # no rule re-run
             self._print_proposal(n, proposal, finding, before, after, len(cands))
-            decision = "yes" if self.yes else ANSWERS.get(
-                str(self.ask("Apply this fix? [y]es / [n]o / [s]kip / [q]uit: ")).strip().lower(), "quit")
+            decision = "yes" if self.yes else self._prompt()
             if self.yes:
-                self.out("Apply this fix? [y]es / [n]o / [s]kip / [q]uit: y   (auto-approved by --yes)")
+                self.out(PROMPT + "y   (auto-approved by --yes)")
             rec.decision = decision
             self.audit.write("decision", **_rec_dict(rec))
             if decision == "quit":
@@ -259,7 +289,7 @@ class FixSession:
         if applied:
             self.out(f"\nWaiting up to {int(self.verify_timeout)}s for the namespace to become healthy...")
             ok, problems, _ = wait_healthy(self.health_snapshot, self.verify_timeout, 5, self.sleep)
-            bundle, findings = self._check()
+            bundle, findings = self._check(final=True)            # end-of-session report, not a loop re-run
         else:
             ok, problems = health(bundle)
         rep.healthy, rep.problems = ok, problems
@@ -269,7 +299,8 @@ class FixSession:
         rep.llm_cost_usd = round(self.budget.cost_usd, 5)
         rep.seconds = round(time.time() - t0, 1)
         self._print_summary(rep)
-        self.audit.write("session_end", healthy=ok, problems=problems, fixes=[_rec_dict(r) for r in rep.fixes], seconds=rep.seconds)
+        self.audit.write("session_end", healthy=ok, problems=problems, stopped=rep.stopped,
+                         skipped=sorted(self.skipped), open_findings=[f.key() for f in findings if f.root_cause], fixes=[_rec_dict(r) for r in rep.fixes], seconds=rep.seconds)
         return rep
 
     def _match(self, roots: List[Finding], p: Proposal) -> Optional[Finding]:
