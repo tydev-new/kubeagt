@@ -242,7 +242,7 @@
 
 <h2 id="flow">4. Fix loop flow</h2>
 <div class="figure">
-<svg viewBox="0 0 1000 1100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kubeagt fix loop flow chart">
+<svg viewBox="0 0 1000 960" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kubeagt fix loop flow chart">
   <defs>
     <marker id="f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
     <marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
@@ -299,7 +299,6 @@
   <polygon class="bx-auto" points="380,440 530,480 380,520 230,480"/>
   <text class="t1" x="380" y="478" text-anchor="middle">Server dry run passes?</text>
   <text class="tag-auto" x="380" y="496" text-anchor="middle">kubeagt decides</text>
-  <path class="ln" d="M530,480 L636,480" marker-end="url(#f)"/>
   <text class="tl" x="545" y="473">no: rejected</text>
   <path class="ln" d="M380,520 L380,546" marker-end="url(#f)"/>
   <text class="tl" x="388" y="538">yes</text>
@@ -315,7 +314,6 @@
   <text class="tag-user" x="380" y="666" text-anchor="middle">YOU DECIDE</text>
   <text class="t1" x="380" y="684" text-anchor="middle">Apply this fix?</text>
   <text class="t2" x="380" y="702" text-anchor="middle">y / n / skip / quit</text>
-  <path class="ln-u" d="M550,682 L636,682" marker-end="url(#fu)"/>
   <text class="tl-u" x="562" y="675">n or skip</text>
   <path class="ln-u" d="M210,682 L50,682 L50,268" marker-end="url(#fu)"/>
   <text class="tl-u" x="140" y="675">quit</text>
@@ -326,7 +324,6 @@
   <rect class="bx-write" x="210" y="762" width="340" height="52" rx="8"/>
   <text class="t1" x="380" y="784" text-anchor="middle">Apply via separate write path</text>
   <text class="t2" x="380" y="803" text-anchor="middle">the AI cannot call it</text>
-  <path class="ln" d="M550,788 L636,788" marker-end="url(#f)"/>
   <text class="tl" x="562" y="781">failed</text>
   <path class="ln" d="M380,814 L380,840" marker-end="url(#f)"/>
   <text class="tl" x="388" y="832">ok</text>
@@ -335,39 +332,30 @@
   <rect class="bx-read" x="210" y="844" width="340" height="52" rx="8"/>
   <text class="t1" x="380" y="866" text-anchor="middle">Verify rollout</text>
   <text class="t2" x="380" y="885" text-anchor="middle">rollout status, re-check the fixed rule</text>
-  <path class="ln" d="M550,870 L636,870" marker-end="url(#f)"/>
-  <text class="tl" x="556" y="863">pass or fail</text>
+  <text class="tl" x="562" y="863">passed or failed</text>
 
-  <!-- Session history and audit log (store) -->
-  <path class="bx-audit" d="M640,467 L640,888 A110,12 0 0,0 860,888 L860,467 A110,12 0 0,0 640,467 Z"/>
-  <path class="ln-a2" d="M640,467 A110,12 0 0,0 860,467"/>
-  <text class="t1" x="750" y="560" text-anchor="middle">Record the outcome</text>
-  <text class="t2" x="750" y="580" text-anchor="middle">session history (for the AI)</text>
-  <text class="t2" x="750" y="596" text-anchor="middle">audit log (on disk)</text>
+  <!-- Session history and audit log: side store, one line into the AI -->
+  <path class="bx-audit" d="M760,342 L760,392 A70,9 0 0,0 900,392 L900,342 A70,9 0 0,0 760,342 Z"/>
+  <path class="ln-a2" d="M760,342 A70,9 0 0,0 900,342"/>
+  <text class="t1" x="830" y="370" text-anchor="middle">Session history</text>
+  <text class="t2" x="830" y="386" text-anchor="middle">and audit log</text>
+  <path class="ln-a" d="M830,333 L830,284" marker-end="url(#fa)"/>
+  <text class="tl-a" x="940" y="424" text-anchor="end">session history: every dry run result, your answer,</text>
+  <text class="tl-a" x="940" y="438" text-anchor="end">apply and verify outcome; fed back so the AI does not repeat</text>
 
-  <!-- history fed back to the AI -->
-  <path class="ln-a" d="M800,455 L800,284" marker-end="url(#fa)"/>
-  <text class="tl-a" x="792" y="418" text-anchor="end">past outcomes fed back so</text>
-  <text class="tl-a" x="792" y="432" text-anchor="end">the AI does not repeat them</text>
-
-  <!-- D tried to apply (automatic) -->
-  <path class="ln" d="M750,900 L750,926" marker-end="url(#f)"/>
-  <polygon class="bx-auto" points="750,930 870,970 750,1010 630,970"/>
-  <text class="t1" x="750" y="968" text-anchor="middle">Apply attempted?</text>
-  <text class="tag-auto" x="750" y="986" text-anchor="middle">kubeagt decides</text>
-
-  <!-- no: back to Any errors left (no rule re-run) -->
-  <path class="ln" d="M870,970 L955,970 L955,140 L534,140" marker-end="url(#f)"/>
-  <text class="tl" x="880" y="962">no</text>
+  <!-- n, skip, rejected dry run: back to Any errors left (no rule re-run) -->
+  <path class="ln" d="M530,480 L955,480"/>
+  <path class="ln-u" d="M550,682 L955,682"/>
+  <path class="ln" d="M955,682 L955,140 L534,140" marker-end="url(#f)"/>
   <text class="tl" x="700" y="133">no rule re-run</text>
 
-  <!-- yes: back to the top -->
-  <path class="ln" d="M750,1010 L750,1030 L985,1030 L985,46 L554,46" marker-end="url(#f)"/>
-  <text class="tl" x="758" y="1024">yes</text>
+  <!-- apply failed or verified: back to the top -->
+  <path class="ln" d="M550,788 L985,788"/>
+  <path class="ln" d="M550,870 L985,870 L985,46 L554,46" marker-end="url(#f)"/>
   <text class="tl" x="650" y="39">re-collect and re-run rules</text>
 
   <!-- legend -->
-  <g transform="translate(20,1062)">
+  <g transform="translate(20,920)">
     <polygon class="bx-user" points="12,0 24,12 12,24 0,12"/>
     <text class="t2" x="32" y="16">your decision</text>
     <polygon class="bx-auto" points="132,0 144,12 132,24 120,12"/>
@@ -383,7 +371,7 @@
   </g>
 </svg>
 </div>
-<p class="caption">kubeagt makes the gray decisions on its own; you make the blue one. Collection and rule checks run at the start and again only after kubeagt tried to apply a fix (whether the apply or the verify passed or failed); that is the loop back to the top. After <code>n</code>, <code>skip</code>, or a rejected dry run nothing in the cluster changed, so the loop returns to Any errors left without re-running the rules. Any errors left counts root-cause findings you have not skipped; symptoms linked to a root cause do not count, and the check is also where <code>--max-fixes</code> (default 10) stops the session. Every proposal counts toward that cap, including rejected and declined ones. Ask the AI is yes when an AI provider is configured and the set of open errors changed since the AI last had nothing to propose. The AI investigates with read-only kubectl, up to <code>--max-steps</code> (12) turns per investigation and <code>--max-tokens</code> (200000) and <code>--max-cost</code> ($0.50) for the whole session. It receives the rule findings, the rule fixes not yet tried, and the last 10 session history entries. If it proposes nothing, repeats a patch already tried, or hits a cap, the next untried rule fix is used. An error with no rule fix, such as a missing ConfigMap, is reported but only fixed if the AI proposes something you approve. Every outcome is recorded: a rejected dry run, your <code>n</code> or <code>skip</code>, a failed apply, and a verify that passed or failed together with the new error state. That session history is kept in memory for this session only and fed back to the AI; the same events, plus every kubectl command and AI call, go to the audit log on disk. Separately, a patch already decided or attempted is never proposed again, because kubeagt blocks it by fingerprint. <code>n</code> rejects that exact patch and the AI may suggest a clearly better one; <code>skip</code> sets the whole error aside for the session; <code>quit</code> ends it; <code>--yes</code> answers <code>y</code> to every proposal. Finish waits up to <code>--verify-timeout</code> (120 seconds) for the namespace to become healthy if any fix was applied, then prints the summary and writes <code>report.json</code> and the audit log. The exit code is 0 only if the namespace is healthy.</p>
+<p class="caption">kubeagt makes the gray decisions on its own; you make the blue one. Collection and rule checks run at the start and again after every apply, whether the apply failed or the fix was applied and its rollout checked; that is the outer loop back to the top. After <code>n</code>, <code>skip</code>, or a rejected dry run nothing in the cluster changed, so the inner loop returns to Any errors left without re-running the rules. Any errors left counts root-cause findings you have not skipped; symptoms linked to a root cause do not count, and this check is also where <code>--max-fixes</code> (default 10) stops the session. Every proposal counts toward that cap, including rejected and declined ones. Ask the AI is yes when an AI provider is configured and the set of open errors changed since the AI last had nothing to propose. The AI investigates with read-only kubectl, up to <code>--max-steps</code> (12) turns per investigation and <code>--max-tokens</code> (200000) and <code>--max-cost</code> ($0.50) for the whole session. It receives the rule findings, the rule fixes not yet tried, and the last 10 session history entries. If it proposes nothing, repeats a patch already tried, or hits a cap, the next untried rule fix is used. An error with no rule fix, such as a missing ConfigMap, is reported but only fixed if the AI proposes something you approve. Session history is kept in memory for this session only. kubeagt adds an entry for every rejected dry run, your <code>n</code> or <code>skip</code>, a failed apply, and a verify that passed or failed together with the new error state; the same events, plus every kubectl command and AI call, are appended to the audit log on disk. Separately, a patch already decided or attempted is never proposed again, because kubeagt blocks it by fingerprint. <code>n</code> rejects that exact patch and the AI may suggest a clearly better one; <code>skip</code> sets the whole error aside for the session; <code>quit</code> ends it; <code>--yes</code> answers <code>y</code> to every proposal. Finish waits up to <code>--verify-timeout</code> (120 seconds) for the namespace to become healthy if any fix was applied, then prints the summary and writes <code>report.json</code> and the audit log. The exit code is 0 only if the namespace is healthy.</p>
 
 <h3>Proposal shown to the user</h3>
 <pre><code>Proposed fix 3   source: deterministic rule probe-port-mismatch   confidence: high
