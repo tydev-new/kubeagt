@@ -38,33 +38,37 @@ for the rollout, checks the logs, re-checks the namespace, and feeds the new sta
 
 ## Getting started
 
-Three ways in. The easiest is step 3, inside your own Grok Bot with no key. Steps 1 and 2 need
-Python 3.9 or newer and `kubectl` on your PATH; the only runtime dependency is PyYAML.
+Three ways in. Steps 1 and 2 run on a Linux machine with your own [OpenRouter key](https://openrouter.ai/settings/keys),
+Python 3.9 or newer, and `kubectl` on your PATH (the only runtime dependency is PyYAML). Step 3 is the
+easiest: it runs inside your own Grok Bot and needs no key.
 
-### 1. Try it on a test cluster with the bundled broken cases
+### 1. Try it on a test cluster with the bundled broken cases (Linux, OpenRouter key)
 
-No API key and no real cluster needed. Create a throwaway [kind](https://kind.sigs.k8s.io/) cluster,
-load one of the bundled broken scenarios, and let kubeagt find and fix it.
+No real cluster needed. On a Linux machine with Docker and [kind](https://kind.sigs.k8s.io/), create a
+throwaway cluster, load one of the bundled broken scenarios, and let kubeagt find and fix it.
 
 ```bash
 git clone https://github.com/tydev-new/kubeagt.git && cd kubeagt
 pip install .
 kind create cluster --name kubeagt-test
+export OPENROUTER_API_KEY=...                                       # your key; default model x-ai/grok-4.7
 
 # the combined Redis case: three bugs in one Deployment
 kubectl --context kind-kubeagt-test create namespace redis-demo
 kubectl --context kind-kubeagt-test -n redis-demo apply -f scenarios/04-redis-combined/manifest.yaml
 kubeagt check --context kind-kubeagt-test -n redis-demo            # read-only findings
-kubeagt fix   --context kind-kubeagt-test -n redis-demo --llm none # rules only, answer y/n/s/q
+kubeagt fix   --context kind-kubeagt-test -n redis-demo            # AI proposes one fix at a time, answer y/n/s/q
 
 # or run every bundled case and get a scorecard
-kubeagt eval --context kind-kubeagt-test --out eval-results
+kubeagt eval --context kind-kubeagt-test --llm live --out eval-results
 ```
+
+Without a key, `--llm none` runs the same loop with the deterministic rules only.
 
 `kubeagt eval` only touches `kubeagt-eval-*` namespaces it creates. Delete the cluster with
 `kind delete cluster --name kubeagt-test` when you are done.
 
-### 2. Install for real
+### 2. Install for real (Linux, OpenRouter key)
 
 ```bash
 pip install git+https://github.com/tydev-new/kubeagt
