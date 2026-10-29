@@ -1,26 +1,41 @@
 # kubeagt
 
+**Broken Kubernetes namespace? kubeagt finds the root causes and fixes them one approved change at a time.**
+
+![kubeagt fixing the combined Redis scenario: three bugs, three proposals, three y answers](docs/demo/redis-demo.gif)
+
+*Real interactive run on a kind cluster, rules only (no AI), `y` sent to the real prompt by a pexpect script, idle time trimmed to 5 s
+([cast](docs/demo/redis-demo.cast)). The first two verifies fail because the remaining bugs still block the rollout; the third fix makes the namespace healthy.*
+
+- **Investigates read-only.** A redacted snapshot, deterministic rules, and optionally an AI that can only run allowlisted read-only kubectl.
+- **One fix at a time,** each with the diagnosis, evidence, an exact diff, and the reasoning.
+- **Nothing changes without your `y`.** The AI has no write tool; applies go through a separate write path.
+- **Checked and recorded.** Server dry run before you see it; verify with rollout, log check, and rule re-check after; every step in an audit log.
+
+| Eval (kind cluster, 2026-10-28) | Result |
+|---|---|
+| 9 scenarios (8 broken, including 3 bugs in one Redis Deployment, plus a healthy control), live Grok 4.7, before the log check | 8/9, $0.1698 total |
+| Same 9 plus case 17, live DeepSeek v4.1 Flash, after the log check | 9/10, $0.0130 total |
+| Rules only, 10 scenario cases and 7 human-answer cases | 17/17 |
+| Mock AI, same 17 cases | 16/17 first pass; the miss was a stale namespace timeout, 05 passed on rerun |
+
+The honest miss is `08-missing-configmap`. Both Grok and DeepSeek marked the missing ConfigMap
+`optional: true`, which hid the error instead of fixing it. Verify now includes a log check, and
+scenario 17 shows it failing exactly that fix (the app logs `FATAL: API_URL not set` and exits). In
+tonight's DeepSeek run the model tried something new on 08: it replaced the ConfigMap reference with
+a made-up `API_URL` value, which the log check cannot catch. Details in [docs/test-plan.md](docs/test-plan.md).
+
+Design: [docs/design.html](docs/design.html). Test plan and results: [docs/test-plan.md](docs/test-plan.md).
+Roadmap and known limitations: [ROADMAP.md](ROADMAP.md).
+
+## How it works
+
 kubeagt, short for kube agent, named like kubectl.
 
-kubeagt diagnoses a broken Kubernetes namespace and fixes it **one change at a time, with your approval**.
-
-It collects a redacted snapshot, runs deterministic checks, optionally lets an LLM (Grok via OpenRouter by default)
+kubeagt collects a redacted snapshot, runs deterministic checks, optionally lets an LLM (Grok via OpenRouter by default)
 investigate with read-only kubectl tools, then proposes a single fix with the diagnosis, the evidence,
 an exact diff, and the reasoning. Nothing changes until you answer `y`. After each change kubeagt waits
-for the rollout, re-checks the namespace, and feeds the new state into the next proposal.
-
-```
-$ kubeagt fix -n shop
-kubeagt: namespace shop, context prod-east
-Found 3 problem(s) and 3 related symptom(s):
-  [critical] Deployment/redis: nodeSelector redisnode=true matches no node
-  [warning] Deployment/redis container redis: memory limit 5Mi is far too small
-  [critical] Deployment/redis container redis: readinessProbe checks port 5432 but the container listens on 6379
-...
-Apply this fix? [y]es / [n]o / [s]kip / [q]uit:
-```
-
-Roadmap and known limitations: see [ROADMAP.md](ROADMAP.md).
+for the rollout, checks the logs, re-checks the namespace, and feeds the new state into the next proposal.
 
 ## Install
 
@@ -65,9 +80,19 @@ Answers at the prompt:
 
 `--yes` approves every fix without asking. It exists for evals; do not use it on a cluster you care about.
 
+After an apply, verify runs three checks: the rollout completed, a log check, and the fixed rule no longer
+fires. The log check compares the target's pod logs before the apply with the logs over a watch window
+after the rollout (`--log-watch-seconds`, default 30, including the previous container after a restart).
+New fatal, panic, stack trace, or "missing" / "not set" lines, or a container exit or restart, fail the
+fix. New error lines, a fetch error, or no log output at all give **verified with warnings**: a silent app
+cannot be confirmed healthy from its logs, so it never passes silently. Details in
+[docs/design.html](docs/design.html#logcheck).
+
 Each `fix` session writes `audit.jsonl` and `report.json` under `~/.kubeagt/sessions/<time>/`
-(override with `--session-dir` or `KUBEAGT_HOME`). A standard audit event schema is proposed in
-[docs/design.html](docs/design.html#audit) (Audit event schema); today's events are the version 0 format.
+(override with `--session-dir` or `KUBEAGT_HOME`). Every audit line uses schema version 1: `schema_version`,
+`ts`, `session_id`, `seq`, `event`, `fix_n`, `target`, `actor`, `outcome`, `reason`, `detail`, with checks
+(policy, dry run, rollout, log, rule re-check) in one shared shape and one `fix_verify` event per applied fix.
+Version 0 files from older releases are still readable. See [docs/design.html](docs/design.html#audit).
 
 ## What it checks
 
