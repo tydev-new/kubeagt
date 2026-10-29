@@ -38,7 +38,8 @@ for the rollout, checks the logs, re-checks the namespace, and feeds the new sta
 
 ## Getting started
 
-You need Python 3.9 or newer and `kubectl` on your PATH. The only runtime dependency is PyYAML.
+Three ways in. The easiest is step 3, inside your own Grok Bot with no key. Steps 1 and 2 need
+Python 3.9 or newer and `kubectl` on your PATH; the only runtime dependency is PyYAML.
 
 ### 1. Try it on a test cluster with the bundled broken cases
 
@@ -63,25 +64,6 @@ kubeagt eval --context kind-kubeagt-test --out eval-results
 `kubeagt eval` only touches `kubeagt-eval-*` namespaces it creates. Delete the cluster with
 `kind delete cluster --name kubeagt-test` when you are done.
 
-**Or try it inside your own Grok Bot**, with no API key: the bot sets up the kind cluster on its own
-computer, runs kubeagt in [relay mode](#relay-mode-a-human-or-another-agent-plays-the-model), and plays
-the model itself. The audit log labels these runs `relay (human/agent answered, not Grok)`. Paste this
-prompt into your bot:
-
-```text
-Install kubeagt from https://github.com/tydev-new/kubeagt (pip install git+https://github.com/tydev-new/kubeagt).
-On your own computer, create a kind cluster named kubeagt-demo (use sudo for Docker and kind if needed)
-and touch no other cluster. Clone the repo, create namespace redis-demo, and apply
-scenarios/04-redis-combined/manifest.yaml into it. Run kubeagt check -n redis-demo and tell me what it finds.
-Then run kubeagt fix -n redis-demo --context kind-kubeagt-demo --llm relay --relay-dir /tmp/kubeagt-relay
-in the background, keeping its stdin open so you can answer its prompt. Act as the model: read each
-/tmp/kubeagt-relay/req-N.json and write resp-N.json (atomically), using only the kubectl, propose_fix,
-and finish tools it offers. Before answering each approval prompt, show me the proposed fix, its
-evidence, and the diff, and wait for my y, n, s, or q. Send exactly my answer. At the end, show me the
-verify results and the audit log summary, then delete the kind cluster when I say so.
-```
-
-
 ### 2. Install for real
 
 ```bash
@@ -95,9 +77,7 @@ kubeagt fix   --context <your-context> -n <namespace>   # one fix at a time, onl
 kubeagt always prints the context it is acting on. With no key set it runs rules only. For
 development: `pip install -e ".[dev]" && pytest -q` in a clone.
 
-### 3. Run with Grok (or another model)
-
-Bring your own [OpenRouter key](https://openrouter.ai/settings/keys). The default model is Grok 4.7.
+**With an AI model.** Bring your own [OpenRouter key](https://openrouter.ai/settings/keys). The default model is Grok 4.7.
 
 ```bash
 export OPENROUTER_API_KEY=...
@@ -109,6 +89,26 @@ kubeagt fix --context <your-context> -n <namespace> \
 `KUBEAGT_LLM_MODEL` sets the model too. The default caps are 12 steps per investigation, 200,000 tokens, and $0.50
 per session. xAI direct, OpenAI, and local models (Ollama, vLLM) are in [LLM provider](#llm-provider) and
 [On-prem and air-gapped clusters](#on-prem-and-air-gapped-clusters).
+
+### 3. Try it with Grok Bot (easiest, no key needed)
+
+Your own Grok Bot can run the whole thing: it sets up the kind cluster on its own computer, runs
+kubeagt in [relay mode](#relay-mode-a-human-or-another-agent-plays-the-model), and plays the model
+itself, so no OpenRouter key is needed. You approve each fix in chat. The audit log labels these runs
+`relay (human/agent answered, not Grok)`. Paste this prompt into your bot:
+
+```text
+Install kubeagt from https://github.com/tydev-new/kubeagt (pip install git+https://github.com/tydev-new/kubeagt).
+On your own computer, create a kind cluster named kubeagt-demo (use sudo for Docker and kind if needed)
+and touch no other cluster. Clone the repo, create namespace redis-demo, and apply
+scenarios/04-redis-combined/manifest.yaml into it. Run kubeagt check -n redis-demo and tell me what it finds.
+Then run kubeagt fix -n redis-demo --context kind-kubeagt-demo --llm relay --relay-dir /tmp/kubeagt-relay
+in the background, keeping its stdin open so you can answer its prompt. Act as the model: read each
+/tmp/kubeagt-relay/req-N.json and write resp-N.json (atomically), using only the kubectl, propose_fix,
+and finish tools it offers. Before answering each approval prompt, show me the proposed fix, its
+evidence, and the diff, and wait for my y, n, s, or q. Send exactly my answer. At the end, show me the
+verify results and the audit log summary, then delete the kind cluster when I say so.
+```
 
 ## Usage
 
