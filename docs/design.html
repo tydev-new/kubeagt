@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kdiag design</title>
+<style>
+  :root { --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --bg:#ffffff; --soft:#f8fafc; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { max-width:1060px; margin:0 auto; padding:40px 28px 80px; }
+  h1 { font-size:30px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 28px; }
+  h2 { font-size:20px; margin:40px 0 10px; padding-bottom:6px; border-bottom:1px solid var(--line); }
+  h3 { font-size:16px; margin:22px 0 6px; }
+  p, li { max-width:900px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:13px; background:#f1f5f9; padding:1px 5px; border-radius:4px; }
+  pre { background:#0f172a; color:#e2e8f0; padding:14px 16px; border-radius:8px; overflow:auto; font-size:13px; }
+  pre code { background:none; padding:0; color:inherit; }
+  table { border-collapse:collapse; width:100%; margin:10px 0 6px; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
+  th { background:var(--soft); font-weight:600; }
+  .figure { border:1px solid var(--line); border-radius:10px; background:var(--soft); padding:14px; margin:12px 0 4px; }
+  .figure svg { width:100%; height:auto; display:block; }
+  .caption { color:var(--muted); font-size:13px; margin:6px 2px 0; }
+  .toc { background:var(--soft); border:1px solid var(--line); border-radius:8px; padding:12px 18px; }
+  .toc ol { margin:4px 0; padding-left:20px; columns:2; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:800px){ .grid2{ grid-template-columns:1fr; } .toc ol{ columns:1; } }
+  /* SVG styles */
+  .bx { fill:#ffffff; stroke:#94a3b8; stroke-width:1.2; }
+  .bx-core { fill:#eff6ff; stroke:#2563eb; stroke-width:1.4; }
+  .bx-write { fill:#fef2f2; stroke:#dc2626; stroke-width:1.4; }
+  .bx-read { fill:#ecfdf5; stroke:#059669; stroke-width:1.4; }
+  .bx-llm { fill:#f5f3ff; stroke:#7c3aed; stroke-width:1.4; }
+  .bx-ext { fill:#f1f5f9; stroke:#475569; stroke-width:1.2; stroke-dasharray:5 3; }
+  .bx-audit { fill:#fffbeb; stroke:#d97706; stroke-width:1.2; }
+  .t1 { font:600 13px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill:#111827; }
+  .t2 { font:11.5px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill:#374151; }
+  .tl { font:italic 11px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill:#475569; }
+  .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size:10.5px; }
+  .layer { font:600 10.5px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; fill:#94a3b8; letter-spacing:.08em; }
+  .ln { fill:none; stroke:#475569; stroke-width:1.4; }
+  .ln-w { fill:none; stroke:#dc2626; stroke-width:1.6; }
+  .ln-r { fill:none; stroke:#059669; stroke-width:1.4; }
+  .ln-l { fill:none; stroke:#7c3aed; stroke-width:1.4; }
+  .ln-a { fill:none; stroke:#d97706; stroke-width:1.2; stroke-dasharray:4 3; }
+  .legend span { display:inline-block; margin-right:16px; font-size:12.5px; color:var(--muted); }
+  .sw { display:inline-block; width:12px; height:12px; border-radius:3px; vertical-align:-2px; margin-right:5px; border:1.5px solid; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>kdiag design</h1>
+<p class="sub">Kubernetes diagnostics with approval-gated fixes. Version 0.1. Written from the code in <code>src/kdiag</code> and <code>README.md</code>.</p>
+
+<div class="toc"><strong>Contents</strong>
+<ol>
+  <li><a href="#purpose">Purpose and goals</a></li>
+  <li><a href="#nongoals">Non-goals</a></li>
+  <li><a href="#components">Components</a></li>
+  <li><a href="#flow">Fix loop flow</a></li>
+  <li><a href="#safety">Safety model</a></li>
+  <li><a href="#llm">LLM provider configuration</a></li>
+  <li><a href="#cli">CLI commands</a></li>
+  <li><a href="#evals">Evals and scorecard</a></li>
+  <li><a href="#k8sgpt">Positioning versus k8sgpt</a></li>
+</ol></div>
+
+<h2 id="purpose">1. Purpose and goals</h2>
+<p>kdiag diagnoses a broken Kubernetes namespace and fixes it one change at a time, with the user's approval. It collects a redacted snapshot, runs deterministic rule checks, optionally lets an LLM investigate with read-only kubectl tools under step, token, and spend caps, then proposes a single fix with a diagnosis, evidence, an exact diff, and the reasoning. Nothing changes until the user answers <code>y</code>. After each change kdiag waits for the rollout, re-checks the namespace, and feeds the new state into the next proposal. It installs from the GitHub repo with <code>pip</code>, needs only Python 3.9+, <code>kubectl</code>, and PyYAML, and works fully without an LLM.</p>
+
+<h2 id="nongoals">2. Non-goals</h2>
+<ul>
+  <li><strong>Cluster-wide diagnosis.</strong> One namespace per session. Cluster-scoped problems (node pressure, CNI, DNS) are seen only through their symptoms.</li>
+  <li><strong>Creating or deleting objects.</strong> The write path only runs <code>kubectl patch</code> on existing Deployments, StatefulSets, DaemonSets, Services, ConfigMaps, and PVCs. kdiag never modifies nodes, RBAC, or Secrets, and never creates missing ConfigMaps or Secrets (the <code>container-config-error</code> rule reports but does not fix).</li>
+  <li><strong>Autonomous remediation.</strong> The LLM can only propose. <code>--yes</code> exists for CI and evals, not for clusters you care about.</li>
+  <li><strong>Resource tuning.</strong> Automatic fixes are conservative heuristics; memory values such as 128Mi request and 512Mi limit are starting points.</li>
+  <li><strong>Extra surfaces in v0.1.</strong> There is no web UI, daemon, or MCP server; kdiag is a CLI. The only runtime dependency is PyYAML, and LLM HTTP calls use the Python standard library.</li>
+</ul>
+
+<h2 id="components">3. Components</h2>
+<div class="figure">
+<svg viewBox="0 0 1000 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kdiag component block diagram">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <marker id="aw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker>
+    <marker id="al" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
+    <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d97706"/></marker>
+  </defs>
+
+  <!-- Layer labels -->
+  <text class="layer" x="6" y="14">INTERFACE</text>
+  <text class="layer" x="6" y="134">ORCHESTRATION</text>
+  <text class="layer" x="6" y="264">ANALYSIS</text>
+  <text class="layer" x="6" y="404">ACCESS</text>
+  <text class="layer" x="6" y="524">EXTERNAL</text>
+
+  <!-- Interface -->
+  <rect class="bx" x="40" y="22" width="180" height="68" rx="8"/>
+  <text class="t1" x="130" y="50" text-anchor="middle">User at a terminal</text>
+  <text class="t2" x="130" y="68" text-anchor="middle">answers y / n / s / q</text>
+
+  <rect class="bx-core" x="300" y="22" width="260" height="68" rx="8"/>
+  <text class="t1" x="430" y="44" text-anchor="middle">cli.py</text>
+  <text class="t2" x="430" y="62" text-anchor="middle">collect | check | fix (alias run) | eval</text>
+  <text class="t2" x="430" y="78" text-anchor="middle"><tspan class="mono">--kubeconfig</tspan>, <tspan class="mono">--context</tspan>, -n, LLM flags</text>
+
+  <rect class="bx" x="640" y="22" width="300" height="68" rx="8"/>
+  <text class="t1" x="790" y="44" text-anchor="middle">evals.py</text>
+  <text class="t2" x="790" y="62" text-anchor="middle">scenarios/ on kind, kdiag-eval-* namespaces</text>
+  <text class="t2" x="790" y="78" text-anchor="middle">scorecard.md and scorecard.json</text>
+
+  <path class="ln" d="M220,56 L296,56" marker-end="url(#a)"/>
+  <path class="ln" d="M430,90 L430,136" marker-end="url(#a)"/>
+  <path class="ln" d="M700,90 L700,114 L520,114 L520,136" marker-end="url(#a)"/>
+  <text class="tl" x="706" y="110">runs FixSession with yes=True</text>
+
+  <!-- Orchestration -->
+  <rect class="bx-audit" x="40" y="140" width="220" height="70" rx="8"/>
+  <text class="t1" x="150" y="164" text-anchor="middle">audit.py  AuditLog</text>
+  <text class="t2" x="150" y="182" text-anchor="middle">audit.jsonl, one JSON line per</text>
+  <text class="t2" x="150" y="198" text-anchor="middle">kubectl call, LLM call, decision</text>
+
+  <rect class="bx-core" x="300" y="140" width="320" height="70" rx="8"/>
+  <text class="t1" x="460" y="162" text-anchor="middle">fixer.py  FixSession</text>
+  <text class="t2" x="460" y="180" text-anchor="middle">collect, check, propose one fix, ask,</text>
+  <text class="t2" x="460" y="196" text-anchor="middle">apply, verify, repeat; writes report.json</text>
+
+  <path class="ln-a" d="M300,175 L264,175" marker-end="url(#aa)"/>
+
+  <!-- bus to analysis -->
+  <path class="ln" d="M460,210 L460,240"/>
+  <path class="ln" d="M110,240 L878,240"/>
+  <path class="ln" d="M110,240 L110,266" marker-end="url(#a)"/>
+  <path class="ln" d="M302,240 L302,266" marker-end="url(#a)"/>
+  <path class="ln" d="M494,240 L494,266" marker-end="url(#a)"/>
+  <path class="ln" d="M686,240 L686,266" marker-end="url(#a)"/>
+  <path class="ln" d="M878,240 L878,266" marker-end="url(#a)"/>
+
+  <!-- Analysis -->
+  <rect class="bx" x="30" y="270" width="160" height="80" rx="8"/>
+  <text class="t1" x="110" y="292" text-anchor="middle">bundle.py + redact.py</text>
+  <text class="t2" x="110" y="310" text-anchor="middle">redacted snapshot</text>
+  <text class="t2" x="110" y="325" text-anchor="middle">save / load dir or .zip</text>
+  <text class="t2" x="110" y="340" text-anchor="middle">(offline check)</text>
+
+  <rect class="bx" x="222" y="270" width="160" height="80" rx="8"/>
+  <text class="t1" x="302" y="292" text-anchor="middle">rules.py + findings.py</text>
+  <text class="t2" x="302" y="310" text-anchor="middle">9 check functions</text>
+  <text class="t2" x="302" y="325" text-anchor="middle">Finding, Fix, root cause</text>
+  <text class="t2" x="302" y="340" text-anchor="middle">vs symptom linking</text>
+
+  <rect class="bx-llm" x="414" y="270" width="160" height="80" rx="8"/>
+  <text class="t1" x="494" y="292" text-anchor="middle">agent.py</text>
+  <text class="t2" x="494" y="310" text-anchor="middle">Investigator + Budget</text>
+  <text class="t2" x="494" y="325" text-anchor="middle">tools: kubectl,</text>
+  <text class="t2" x="494" y="340" text-anchor="middle">propose_fix, finish</text>
+
+  <rect class="bx" x="606" y="270" width="160" height="80" rx="8"/>
+  <text class="t1" x="686" y="292" text-anchor="middle">patching.py</text>
+  <text class="t2" x="686" y="310" text-anchor="middle">JSON / merge patch</text>
+  <text class="t2" x="686" y="325" text-anchor="middle">preview, unified</text>
+  <text class="t2" x="686" y="340" text-anchor="middle">spec diff</text>
+
+  <rect class="bx" x="798" y="270" width="160" height="80" rx="8"/>
+  <text class="t1" x="878" y="292" text-anchor="middle">health.py</text>
+  <text class="t2" x="878" y="310" text-anchor="middle">workloads ready,</text>
+  <text class="t2" x="878" y="325" text-anchor="middle">pods Running+Ready,</text>
+  <text class="t2" x="878" y="340" text-anchor="middle">Services have endpoints</text>
+
+  <!-- Analysis to access -->
+  <path class="ln-r" d="M110,350 L110,406" marker-end="url(#ar)"/>
+  <path class="ln-r" d="M440,350 L440,380 L250,380 L250,406" marker-end="url(#ar)"/>
+  <text class="tl" x="262" y="375">kubectl tool (read only)</text>
+  <path class="ln-l" d="M520,350 L520,406" marker-end="url(#al)"/>
+  <text class="tl" x="526" y="384">chat(messages, tools)</text>
+
+  <!-- write path: FixSession to KubeWriter, routed on the right -->
+  <path class="ln-w" d="M620,188 L978,188 L978,450 L954,450" marker-end="url(#aw)"/>
+  <text class="tl" x="790" y="182" style="fill:#b91c1c">approved fixes and dry runs only</text>
+
+  <!-- Access -->
+  <rect class="bx-read" x="40" y="410" width="260" height="80" rx="8"/>
+  <text class="t1" x="170" y="432" text-anchor="middle">kube.py  ReadOnlyKubectl</text>
+  <text class="t2" x="170" y="450" text-anchor="middle">allowlist: verbs, resources, flags</text>
+  <text class="t2" x="170" y="465" text-anchor="middle">namespace pinned, output redacted</text>
+  <text class="t2" x="170" y="480" text-anchor="middle">and capped at 12000 chars</text>
+
+  <rect class="bx-llm" x="340" y="410" width="280" height="80" rx="8"/>
+  <text class="t1" x="480" y="432" text-anchor="middle">llm.py  ChatClient</text>
+  <text class="t2" x="480" y="450" text-anchor="middle">OpenAICompatClient: openrouter (default),</text>
+  <text class="t2" x="480" y="465" text-anchor="middle">xai, openai, custom</text>
+  <text class="t2" x="480" y="480" text-anchor="middle">HintFollowingMock, ScriptedLLM, RelayClient</text>
+
+  <rect class="bx-write" x="680" y="410" width="270" height="80" rx="8"/>
+  <text class="t1" x="815" y="432" text-anchor="middle">kube.py  KubeWriter</text>
+  <text class="t2" x="815" y="450" text-anchor="middle">builds kubectl patch from validated</text>
+  <text class="t2" x="815" y="465" text-anchor="middle">kind, name, patch type, patch</text>
+  <text class="t2" x="815" y="480" text-anchor="middle"><tspan class="mono">--dry-run=server</tspan>, rollout status</text>
+
+  <!-- External -->
+  <rect class="bx-ext" x="340" y="530" width="280" height="56" rx="8"/>
+  <text class="t1" x="480" y="553" text-anchor="middle">LLM endpoint</text>
+  <text class="t2" x="480" y="571" text-anchor="middle">/chat/completions, or relay req-N / resp-N.json</text>
+  <path class="ln-l" d="M480,490 L480,526" marker-end="url(#al)"/>
+
+  <rect class="bx-ext" x="40" y="604" width="910" height="44" rx="8"/>
+  <text class="t1" x="495" y="631" text-anchor="middle">Kubernetes API server (kubectl subprocess, user's kubeconfig and context)</text>
+  <path class="ln-r" d="M170,490 L170,600" marker-end="url(#ar)"/>
+  <path class="ln-w" d="M815,490 L815,600" marker-end="url(#aw)"/>
+</svg>
+<div class="legend"><span><i class="sw" style="background:#ecfdf5;border-color:#059669"></i>read path</span><span><i class="sw" style="background:#fef2f2;border-color:#dc2626"></i>write path</span><span><i class="sw" style="background:#f5f3ff;border-color:#7c3aed"></i>LLM path</span><span><i class="sw" style="background:#fffbeb;border-color:#d97706"></i>audit</span><span><i class="sw" style="background:#f1f5f9;border-color:#475569"></i>external</span></div>
+</div>
+<p class="caption">The LLM reaches the cluster only through ReadOnlyKubectl. KubeWriter is called by FixSession alone (for server dry runs while validating a proposal, and for applying a fix after the user says yes). ReadOnlyKubectl and KubeWriter both record every kubectl command to the AuditLog.</p>
+
+<table>
+<tr><th>Module</th><th>Responsibility</th></tr>
+<tr><td><code>cli.py</code></td><td>argparse entry point. Builds <code>KubeTarget</code>, <code>AuditLog</code>, <code>ReadOnlyKubectl</code>, <code>KubeWriter</code>, the LLM client, and <code>FixSession</code>. Prints the context it acts on.</td></tr>
+<tr><td><code>kube.py</code></td><td><code>validate_read_argv</code> and <code>ReadOnlyKubectl</code> (read path); <code>KubeWriter</code> (patch, server dry run, rollout status).</td></tr>
+<tr><td><code>bundle.py</code></td><td><code>collect()</code> reads pods, deployments, replica sets, stateful sets, daemon sets, services, endpoints, config maps, PVCs, events, nodes, storage classes, Secret names and key names, and recent logs. <code>Bundle</code> saves to and loads from a directory or zip, so rules run offline.</td></tr>
+<tr><td><code>redact.py</code></td><td>Masks Secret data, ConfigMap values matching sensitive patterns, env values with sensitive names, bearer and basic headers, private keys, AWS keys, <code>sk-</code>/<code>xai-</code>/<code>ghp_</code> style tokens, and JWTs. Drops <code>last-applied-configuration</code>.</td></tr>
+<tr><td><code>rules.py</code>, <code>findings.py</code></td><td>Deterministic checks producing <code>Finding</code> objects, some with a <code>Fix</code>. Symptoms (for example <code>unschedulable</code>, <code>probe-failing</code>) are linked to a root cause on the same workload. Findings are ordered by priority.</td></tr>
+<tr><td><code>agent.py</code></td><td><code>Investigator</code>: the tool-calling loop with a system prompt, three tools, and a <code>Budget</code> (steps, tokens, cost).</td></tr>
+<tr><td><code>llm.py</code></td><td><code>LLMConfig</code> presets and precedence, <code>OpenAICompatClient</code>, <code>HintFollowingMock</code>, <code>ScriptedLLM</code>, <code>RelayClient</code>, <code>make_client()</code>.</td></tr>
+<tr><td><code>fixer.py</code></td><td><code>FixSession</code>: the approval-gated loop, proposal display, apply and verify, session history fed back to the LLM, <code>SessionReport</code>.</td></tr>
+<tr><td><code>patching.py</code></td><td>Local RFC 6902 subset and RFC 7386 merge patch for previews, and <code>spec_diff</code>.</td></tr>
+<tr><td><code>health.py</code></td><td>What "fixed" means: workloads fully ready and updated, pods Running and Ready, selector Services with ready endpoints. <code>wait_healthy</code> polls.</td></tr>
+<tr><td><code>evals.py</code></td><td>Scenario harness and scorecard writer.</td></tr>
+<tr><td><code>audit.py</code></td><td>Append-only JSON lines log in <code>~/.kdiag/sessions/&lt;time&gt;/</code> (or <code>KDIAG_HOME</code>).</td></tr>
+</table>
+
+<h2 id="flow">4. Fix loop flow</h2>
+<div class="figure">
+<svg viewBox="0 0 1000 1110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kdiag fix loop flow chart">
+  <defs>
+    <marker id="f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+    <marker id="fw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
+    <marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
+  </defs>
+
+  <!-- Start -->
+  <rect class="bx-core" x="270" y="20" width="260" height="44" rx="22"/>
+  <text class="t1" x="400" y="47" text-anchor="middle">kdiag fix -n NS</text>
+  <path class="ln" d="M400,64 L400,91" marker-end="url(#f)"/>
+
+  <!-- Collect -->
+  <rect class="bx-read" x="230" y="95" width="340" height="56" rx="8"/>
+  <text class="t1" x="400" y="117" text-anchor="middle">Collect redacted snapshot</text>
+  <text class="t2" x="400" y="137" text-anchor="middle">bundle.collect() through ReadOnlyKubectl</text>
+  <path class="ln" d="M400,151 L400,176" marker-end="url(#f)"/>
+
+  <!-- Rules -->
+  <rect class="bx" x="230" y="180" width="340" height="56" rx="8"/>
+  <text class="t1" x="400" y="202" text-anchor="middle">Run deterministic rules</text>
+  <text class="t2" x="400" y="222" text-anchor="middle">root causes, linked symptoms, candidate fixes</text>
+  <path class="ln" d="M400,236 L400,261" marker-end="url(#f)"/>
+
+  <!-- D1 -->
+  <polygon class="bx" points="400,265 550,310 400,355 250,310"/>
+  <text class="t1" x="400" y="306" text-anchor="middle">LLM enabled and</text>
+  <text class="t1" x="400" y="322" text-anchor="middle">root causes changed?</text>
+  <path class="ln-l" d="M550,310 L636,310" marker-end="url(#fl)"/>
+  <text class="tl" x="575" y="303">yes</text>
+  <path class="ln" d="M400,355 L400,401" marker-end="url(#f)"/>
+  <text class="tl" x="408" y="382">no</text>
+
+  <!-- LLM box -->
+  <rect class="bx-llm" x="640" y="262" width="320" height="110" rx="8"/>
+  <text class="t1" x="800" y="284" text-anchor="middle">LLM investigation (agent.py)</text>
+  <text class="t2" x="800" y="304" text-anchor="middle">tools: kubectl (read only), propose_fix, finish</text>
+  <text class="t2" x="800" y="321" text-anchor="middle">caps: <tspan class="mono">--max-steps</tspan> 12, <tspan class="mono">--max-tokens</tspan> 200000,</text>
+  <text class="t2" x="800" y="337" text-anchor="middle"><tspan class="mono">--max-cost</tspan> $0.50 per session</text>
+  <text class="t2" x="800" y="354" text-anchor="middle">proposal pre-checked by server dry run</text>
+  <path class="ln-l" d="M800,372 L800,450 L554,450" marker-end="url(#fl)"/>
+  <text class="tl" x="808" y="420">proposal, or finish / cap hit</text>
+
+  <!-- D2 -->
+  <polygon class="bx" points="400,405 550,450 400,495 250,450"/>
+  <text class="t1" x="400" y="446" text-anchor="middle">New LLM proposal, or a</text>
+  <text class="t1" x="400" y="462" text-anchor="middle">rule candidate left?</text>
+  <path class="ln" d="M400,495 L400,526" marker-end="url(#f)"/>
+  <text class="tl" x="408" y="516">yes</text>
+  <path class="ln" d="M250,450 L110,450 L110,466" marker-end="url(#f)"/>
+  <text class="tl" x="200" y="443">no</text>
+
+  <!-- Finish -->
+  <rect class="bx-core" x="20" y="470" width="180" height="140" rx="10"/>
+  <text class="t1" x="110" y="494" text-anchor="middle">Finish</text>
+  <text class="t2" x="110" y="514" text-anchor="middle">if fixes applied, wait</text>
+  <text class="t2" x="110" y="530" text-anchor="middle">for namespace health</text>
+  <text class="t2" x="110" y="546" text-anchor="middle">(<tspan class="mono">--verify-timeout</tspan>)</text>
+  <text class="t2" x="110" y="562" text-anchor="middle">final rules, summary,</text>
+  <text class="t2" x="110" y="578" text-anchor="middle">report.json, exit 0 if</text>
+  <text class="t2" x="110" y="594" text-anchor="middle">healthy, else 1</text>
+
+  <!-- Dry run -->
+  <rect class="bx-write" x="230" y="530" width="340" height="56" rx="8"/>
+  <text class="t1" x="400" y="552" text-anchor="middle">Server-side dry run and diff</text>
+  <text class="t2" x="400" y="572" text-anchor="middle">KubeWriter <tspan class="mono">--dry-run=server</tspan>, spec_diff before/after</text>
+  <path class="ln" d="M570,558 L636,558" marker-end="url(#f)"/>
+  <text class="tl" x="580" y="551">rejected</text>
+  <path class="ln" d="M400,586 L400,611" marker-end="url(#f)"/>
+  <text class="tl" x="408" y="603">ok</text>
+
+  <rect class="bx" x="640" y="530" width="320" height="56" rx="8"/>
+  <text class="t1" x="800" y="552" text-anchor="middle">Record as invalid</text>
+  <text class="t2" x="800" y="572" text-anchor="middle">dry run error added to session history</text>
+
+  <!-- Show proposal -->
+  <rect class="bx" x="230" y="615" width="340" height="70" rx="8"/>
+  <text class="t1" x="400" y="637" text-anchor="middle">Show one proposal</text>
+  <text class="t2" x="400" y="656" text-anchor="middle">target, diagnosis, evidence, diff,</text>
+  <text class="t2" x="400" y="672" text-anchor="middle">reasoning ("Why"), kubectl command</text>
+  <path class="ln" d="M400,685 L400,711" marker-end="url(#f)"/>
+
+  <!-- D3 -->
+  <polygon class="bx" points="400,715 550,760 400,805 250,760"/>
+  <text class="t1" x="400" y="756" text-anchor="middle">Apply this fix?</text>
+  <text class="t1" x="400" y="772" text-anchor="middle">y / n / s / q</text>
+  <text class="tl" x="410" y="822">y (or <tspan class="mono">--yes</tspan>)</text>
+  <path class="ln" d="M400,805 L400,836" marker-end="url(#f)"/>
+  <path class="ln" d="M550,760 L636,760" marker-end="url(#f)"/>
+  <text class="tl" x="574" y="753">n or s</text>
+  <path class="ln" d="M250,760 L110,760 L110,614" marker-end="url(#f)"/>
+  <text class="tl" x="160" y="753">q (quit)</text>
+
+  <rect class="bx" x="640" y="725" width="320" height="70" rx="8"/>
+  <text class="t1" x="800" y="747" text-anchor="middle">Record the decision</text>
+  <text class="t2" x="800" y="766" text-anchor="middle">n: rejection noted in history for the LLM</text>
+  <text class="t2" x="800" y="782" text-anchor="middle">s: finding skipped for the rest of the session</text>
+
+  <!-- Apply -->
+  <rect class="bx-write" x="230" y="840" width="340" height="56" rx="8"/>
+  <text class="t1" x="400" y="862" text-anchor="middle">Apply through the write path</text>
+  <text class="t2" x="400" y="882" text-anchor="middle">KubeWriter.patch(kind, name, patch type, patch)</text>
+  <path class="ln" d="M400,896 L400,921" marker-end="url(#f)"/>
+
+  <!-- Verify -->
+  <rect class="bx-read" x="230" y="925" width="340" height="70" rx="8"/>
+  <text class="t1" x="400" y="947" text-anchor="middle">Verify and re-check</text>
+  <text class="t2" x="400" y="966" text-anchor="middle">rollout status, re-collect, re-run rules;</text>
+  <text class="t2" x="400" y="982" text-anchor="middle">if not resolved, new state goes to history</text>
+
+  <!-- loop rail -->
+  <path class="ln" d="M400,995 L400,1015 L985,1015 L985,250 L400,250"/>
+  <path class="ln" d="M960,558 L985,558"/>
+  <path class="ln" d="M960,760 L985,760"/>
+  <text class="tl" x="600" y="1032">next round, up to <tspan class="mono">--max-fixes</tspan> (default 10)</text>
+
+  <!-- audit footer -->
+  <rect class="bx-audit" x="20" y="1048" width="960" height="48" rx="8"/>
+  <text class="t1" x="500" y="1068" text-anchor="middle">Audit log (audit.jsonl)</text>
+  <text class="t2" x="500" y="1086" text-anchor="middle">every kubectl command (read, dry run, write, verify), every LLM call, every decision, and every result is appended as one JSON line</text>
+</svg>
+</div>
+<p class="caption">When the LLM is on, it leads each round and sees the rule findings, the candidate fixes, and the session history. When it is off, finishes, or hits a cap, the first unhandled rule candidate is used. A fix already decided or attempted is never proposed again (fingerprint check). When the root-cause set has not changed since the LLM last had nothing to propose, the LLM is not called again for that state.</p>
+
+<h3>Proposal shown to the user</h3>
+<pre><code>Proposed fix 3   source: deterministic rule probe-port-mismatch   confidence: high
+Target:    Deployment/redis   namespace: shop   context: prod-east
+Diagnosis: ...
+Evidence:
+  - ...
+Change:    ...
+    --- Deployment/redis (current)
+    +++ Deployment/redis (proposed)
+    ...
+Why:       ...
+Command:   kubectl patch deployment redis -n shop --type json -p '[...]'
+Apply this fix? [y]es / [n]o / [s]kip / [q]uit:</code></pre>
+<p class="caption">Layout from <code>FixSession._print_proposal</code>. Field values are elided here.</p>
+
+<h2 id="safety">5. Safety model</h2>
+<div class="grid2">
+<div>
+<h3>Read and write separation</h3>
+<ul>
+  <li><code>ReadOnlyKubectl</code> is the only cluster access the LLM has. No method on it mutates the cluster.</li>
+  <li><code>KubeWriter</code> accepts no free-form argv. It builds <code>kubectl patch</code> from a normalized kind, a name without <code>/</code> or spaces, a patch type (<code>json</code>, <code>merge</code>, <code>strategic</code>), and a patch object or list.</li>
+  <li>The LLM's <code>propose_fix</code> tool returns data only. There is no LLM tool that reaches <code>KubeWriter</code>.</li>
+  <li>Every proposal is validated with <code>--dry-run=server</code> before it is shown; the dry run output also produces the diff.</li>
+</ul>
+<h3>Allowlist</h3>
+<ul>
+  <li>Verbs: <code>get</code>, <code>describe</code>, <code>logs</code>, <code>events</code>, <code>explain</code>, <code>top</code>, <code>version</code>, <code>api-resources</code>.</li>
+  <li>Resources: workloads, pods, services, endpoints, config maps, PVCs, nodes, events, ingresses, network policies, and similar. Secrets are not on the list.</li>
+  <li>Flags: a fixed set; output formats limited to json, yaml, wide, name, jsonpath, custom-columns (so no go-templates). <code>--raw</code>, <code>--kubeconfig</code>, <code>--context</code>, <code>--token</code>, <code>exec</code> are refused.</li>
+  <li>The namespace is pinned: kdiag appends <code>-n</code> itself and the Investigator refuses <code>-n</code>, <code>--namespace</code>, <code>-A</code>.</li>
+</ul>
+</div>
+<div>
+<h3>Redaction</h3>
+<ul>
+  <li>Secret values are never read. Collection uses a template that prints only Secret names, types, and key names.</li>
+  <li><code>redact_obj</code> and <code>redact_text</code> apply to bundles, LLM tool output, LLM error bodies, and the audit log.</li>
+</ul>
+<h3>Caps</h3>
+<ul>
+  <li>Per investigation: <code>--max-steps</code> (default 12 LLM turns).</li>
+  <li>Per session: <code>--max-tokens</code> (200000) and <code>--max-cost</code> (USD 0.50). Cost uses OpenRouter's reported <code>usage.cost</code> when present, else token counts times preset prices.</li>
+  <li>Per session: <code>--max-fixes</code> (10). Tool output capped at 12000 characters.</li>
+</ul>
+<h3>No creation of nodes, Secrets, or new objects</h3>
+<ul>
+  <li>Writable kinds: Deployment, StatefulSet, DaemonSet, Service, ConfigMap, PersistentVolumeClaim, and only via patch.</li>
+  <li>Evals refuse to run without an explicit <code>--context</code> or <code>--kubeconfig</code>, and only create or delete <code>kdiag-eval-*</code> namespaces.</li>
+</ul>
+</div>
+</div>
+
+<h2 id="llm">6. LLM provider configuration</h2>
+<p>Any OpenAI-compatible chat completions API with tool calling works. Precedence: CLI flags, then <code>KDIAG_LLM_*</code> environment variables, then the provider preset. Each user brings their own key; kdiag reads it from an environment variable and never stores it.</p>
+<table>
+<tr><th>Preset</th><th>Base URL</th><th>Key variable</th><th>Default model</th></tr>
+<tr><td><code>openrouter</code> (default)</td><td><code>https://openrouter.ai/api/v1</code></td><td><code>OPENROUTER_API_KEY</code></td><td><code>x-ai/grok-4.7</code></td></tr>
+<tr><td><code>xai</code></td><td><code>https://api.x.ai/v1</code></td><td><code>XAI_API_KEY</code></td><td><code>grok-4.7</code></td></tr>
+<tr><td><code>openai</code></td><td><code>https://api.openai.com/v1</code></td><td><code>OPENAI_API_KEY</code></td><td>none, set <code>--llm-model</code></td></tr>
+<tr><td><code>custom</code></td><td>none, set <code>--llm-base-url</code></td><td><code>KDIAG_LLM_API_KEY</code></td><td>none, set <code>--llm-model</code></td></tr>
+</table>
+<table>
+<tr><th><code>--llm</code> mode</th><th>Behavior</th></tr>
+<tr><td><code>auto</code> (default for fix)</td><td>Use the provider if its key variable is set, otherwise rules only.</td></tr>
+<tr><td><code>none</code> (default for eval)</td><td>Rules only.</td></tr>
+<tr><td><code>live</code></td><td>Require the provider (<code>OpenAICompatClient</code>); fails if the key is missing.</td></tr>
+<tr><td><code>mock</code></td><td><code>HintFollowingMock</code>: keyless, makes no LLM API calls. Runs two real read-only kubectl calls, then proposes the first rule candidate. No reasoning of its own; tests plumbing.</td></tr>
+<tr><td><code>relay</code></td><td><code>RelayClient</code>: writes <code>req-N.json</code> (messages and tool schemas) to <code>--relay-dir</code> and waits up to <code>--relay-timeout</code> (900 s) for <code>resp-N.json</code>. A human or another agent answers. Labeled <code>relay (human/agent answered, not Grok)</code> in the audit log and scorecard.</td></tr>
+</table>
+<p><code>ScriptedLLM</code> is a third test double used only by unit tests: it replays pre-written assistant messages in order. The real client retries HTTP 429 and 5xx and network errors up to 3 times with backoff, and sends OpenRouter attribution headers only to OpenRouter.</p>
+
+<h2 id="cli">7. CLI commands</h2>
+<table>
+<tr><th>Command</th><th>What it does</th><th>Changes the cluster?</th></tr>
+<tr><td><code>kdiag collect -n NS [-o bundle.zip] [--log-tail 50]</code></td><td>Writes a redacted snapshot bundle (directory, or zip if the path ends in .zip).</td><td>No</td></tr>
+<tr><td><code>kdiag check -n NS [--json] [--min-memory 32]</code></td><td>Runs the deterministic rules live and prints findings. Exit code 1 if any root cause is found.</td><td>No</td></tr>
+<tr><td><code>kdiag check --bundle bundle.zip</code></td><td>Same rules against an offline bundle.</td><td>No</td></tr>
+<tr><td><code>kdiag fix -n NS</code> (alias <code>run</code>)</td><td>The interactive loop above. Options include <code>--yes</code>, <code>--max-fixes</code>, <code>--verify-timeout</code>, <code>--session-dir</code>, and the LLM flags.</td><td>Only after <code>y</code></td></tr>
+<tr><td><code>kdiag eval --context CTX [--only 04] [--out eval-results] [--keep] [--list]</code></td><td>Runs bundled scenarios and writes a scorecard.</td><td>Yes, in <code>kdiag-eval-*</code> namespaces only</td></tr>
+</table>
+<p>All commands accept <code>--kubeconfig</code> and <code>--context</code>; kdiag uses kubectl's defaults when they are omitted and always prints the context it acts on. Exit code 2 signals setup errors such as a missing namespace or kubectl error.</p>
+
+<h3>Rules and automatic fixes</h3>
+<table>
+<tr><th>Rule</th><th>Detects</th><th>Automatic fix</th></tr>
+<tr><td><code>nodeselector-no-match</code></td><td>nodeSelector no node satisfies</td><td>remove the unmatched keys</td></tr>
+<tr><td><code>node-affinity-no-match</code></td><td>required node affinity no node satisfies</td><td>remove the required affinity</td></tr>
+<tr><td><code>probe-port-mismatch</code></td><td>probe on a port the container does not declare</td><td>point the probe at the declared port</td></tr>
+<tr><td><code>memory-too-small</code></td><td>memory request or limit under 32Mi</td><td>128Mi request, 512Mi limit</td></tr>
+<tr><td><code>oom-killed</code></td><td>container OOMKilled</td><td>double the limit (minimum 128Mi)</td></tr>
+<tr><td><code>image-pull-failure</code></td><td>ErrImagePull, ImagePullBackOff, InvalidImageName</td><td>roll back to the previous revision's image, when there is one</td></tr>
+<tr><td><code>crash-loop</code></td><td>CrashLoopBackOff and repeated non-zero exits</td><td>remove a command override whose executable does not exist</td></tr>
+<tr><td><code>container-config-error</code></td><td>missing ConfigMap or Secret reference</td><td>none, by design</td></tr>
+<tr><td><code>service-no-matching-pods</code></td><td>Service selector matches no pod</td><td>point the selector at the only workload serving the target port</td></tr>
+<tr><td><code>service-target-port-mismatch</code></td><td>targetPort not declared by selected pods</td><td>use the declared port</td></tr>
+<tr><td><code>unschedulable</code>, <code>probe-failing</code>, <code>pvc-pending</code>, <code>service-no-ready-endpoints</code>, <code>workload-unavailable</code></td><td>status and event checks</td><td>none; shown as symptoms or left to the LLM</td></tr>
+</table>
+
+<h2 id="evals">8. Evals and scorecard</h2>
+<p>Each directory in <code>scenarios/</code> has a <code>manifest.yaml</code> and an <code>expected.yaml</code> listing setup steps, expected root-cause rules, field checks the fixed objects must pass, and whether the namespace should be healthy afterwards. For each scenario the harness resets a <code>kdiag-eval-&lt;name&gt;</code> namespace, applies the manifests, waits to settle, runs the rules for detection, runs a <code>FixSession</code> with <code>yes=True</code>, checks the live objects, and deletes the namespace unless <code>--keep</code> is set.</p>
+<table>
+<tr><th>Scenario</th><th>Bug</th></tr>
+<tr><td>00-healthy</td><td>none; nothing should be proposed</td></tr>
+<tr><td>01-nodeselector</td><td>nodeSelector <code>disktype=ssd</code>, no such node</td></tr>
+<tr><td>02-probe-port</td><td>Redis readiness probe on 5432, Redis listens on 6379</td></tr>
+<tr><td>03-memory-5mi</td><td>5Mi memory request and limit</td></tr>
+<tr><td>04-redis-combined</td><td>all three of the above on one Redis Deployment</td></tr>
+<tr><td>05-bad-image-tag</td><td>working Deployment updated to a tag that does not exist</td></tr>
+<tr><td>06-service-selector</td><td>Service selects <code>app=redis-cache</code>, pods are <code>app=redis</code></td></tr>
+<tr><td>07-crashloop-bad-command</td><td>command override <code>redis-srv</code> (typo)</td></tr>
+<tr><td>08-missing-configmap</td><td>envFrom a missing ConfigMap; must be detected and must not be "fixed"</td></tr>
+</table>
+<p>The scorecard (<code>scorecard.md</code> and <code>scorecard.json</code> under <code>--out</code>) reports per scenario: detected versus expected rules, detection, correct fix, healthy after versus expected, fixes applied, steps (fix proposals plus LLM read-only tool calls), and time (diagnosis, fixes, and verification; setup excluded). A scenario passes when detection, fix, and health all match. Transcripts, <code>report.json</code>, and <code>audit.jsonl</code> are written per scenario. Unit tests use pytest with <code>ScriptedLLM</code>; GitHub Actions runs ruff and pytest on Python 3.9 and 3.12, with an optional kind end-to-end eval job.</p>
+
+<h2 id="k8sgpt">9. Positioning versus k8sgpt</h2>
+<p><a href="https://github.com/k8sgpt-ai/k8sgpt">k8sgpt</a> pioneered deterministic analyzers plus a one-shot LLM explanation of what they find. kdiag builds on the same idea and adds:</p>
+<ul>
+  <li><strong>Agent loop:</strong> the model gathers its own evidence with allowlisted read-only tools, under step, token, and spend caps.</li>
+  <li><strong>Gated fixes:</strong> one concrete patch at a time, with diff, evidence, and reasoning, applied only on approval.</li>
+  <li><strong>Verification:</strong> rollout and re-check after every change, with failures fed back into the next round.</li>
+  <li><strong>Offline bundles:</strong> collect once, analyze anywhere, with secrets redacted.</li>
+  <li><strong>Evals:</strong> reproducible broken scenarios on kind with a scorecard, so rule and prompt changes are measured.</li>
+</ul>
+
+</main>
+</body>
+</html>
