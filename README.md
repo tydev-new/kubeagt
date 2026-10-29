@@ -56,6 +56,29 @@ pytest -q
 
 The only runtime dependency is PyYAML. HTTP calls to the LLM use the Python standard library.
 
+## Try it in your Grok Bot
+
+You can run the whole thing inside your own Grok Bot, with no API key: the bot sets up a throwaway
+kind cluster on its own computer, runs kubeagt in relay mode, and plays the model itself (see
+[Relay mode](#relay-mode-a-human-or-another-agent-plays-the-model)). The audit log labels these runs
+`relay (human/agent answered, not Grok)`. Paste this prompt into your bot:
+
+```text
+Install kubeagt from https://github.com/tydev-new/kubeagt (pip install git+https://github.com/tydev-new/kubeagt).
+On your own computer, create a kind cluster named kubeagt-demo (use sudo for Docker and kind if needed)
+and touch no other cluster. Clone the repo, create namespace redis-demo, and apply
+scenarios/04-redis-combined/manifest.yaml into it. Run kubeagt check -n redis-demo and tell me what it finds.
+Then run kubeagt fix -n redis-demo --context kind-kubeagt-demo --llm relay --relay-dir /tmp/kubeagt-relay
+in the background, keeping its stdin open so you can answer its prompt. Act as the model: read each
+/tmp/kubeagt-relay/req-N.json and write resp-N.json (atomically), using only the kubectl, propose_fix,
+and finish tools it offers. Before answering each approval prompt, show me the proposed fix, its
+evidence, and the diff, and wait for my y, n, s, or q. Send exactly my answer. At the end, show me the
+verify results and the audit log summary, then delete the kind cluster when I say so.
+```
+
+To use a real model instead, give the bot your OpenRouter key and drop `--llm relay` (see
+[LLM provider](#llm-provider)).
+
 ## Usage
 
 All commands accept `--kubeconfig`, `--context`, and `-n/--namespace`. kubeagt uses kubectl's own
