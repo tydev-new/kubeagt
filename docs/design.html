@@ -234,11 +234,12 @@
 
 <h2 id="flow">4. Fix loop flow</h2>
 <div class="figure">
-<svg viewBox="0 0 1000 1110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kubeagt fix loop flow chart">
+<svg viewBox="0 0 1000 1100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="kubeagt fix loop flow chart">
   <defs>
     <marker id="f" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
     <marker id="fw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker>
     <marker id="fl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/></marker>
+    <marker id="fg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#059669"/></marker>
   </defs>
 
   <!-- Start -->
@@ -246,68 +247,70 @@
   <text class="t1" x="400" y="47" text-anchor="middle">kubeagt fix -n NS</text>
   <path class="ln" d="M400,64 L400,91" marker-end="url(#f)"/>
 
-  <!-- Collect -->
-  <rect class="bx-read" x="230" y="95" width="340" height="56" rx="8"/>
-  <text class="t1" x="400" y="117" text-anchor="middle">Collect redacted snapshot</text>
-  <text class="t2" x="400" y="137" text-anchor="middle">bundle.collect() through ReadOnlyKubectl</text>
-  <path class="ln" d="M400,151 L400,176" marker-end="url(#f)"/>
+  <!-- Collect and rules: _check() -->
+  <rect class="bx-read" x="230" y="95" width="340" height="70" rx="8"/>
+  <text class="t1" x="400" y="117" text-anchor="middle">Collect snapshot and run rules</text>
+  <text class="t2" x="400" y="137" text-anchor="middle"><tspan class="mono">_check()</tspan>: bundle.collect() through ReadOnlyKubectl,</text>
+  <text class="t2" x="400" y="153" text-anchor="middle">then deterministic rules: root causes, candidate fixes</text>
+  <path class="ln" d="M400,165 L400,244" marker-end="url(#f)"/>
 
-  <!-- Rules -->
-  <rect class="bx" x="230" y="180" width="340" height="56" rx="8"/>
-  <text class="t1" x="400" y="202" text-anchor="middle">Run deterministic rules</text>
-  <text class="t2" x="400" y="222" text-anchor="middle">root causes, linked symptoms, candidate fixes</text>
-  <path class="ln" d="M400,236 L400,261" marker-end="url(#f)"/>
+  <!-- Choose next proposal container -->
+  <rect x="220" y="190" width="745" height="310" rx="12" fill="#f8fafc" stroke="#2563eb" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text class="t1" x="416" y="212">Choose next proposal</text>
+  <text class="t2" x="416" y="229">LLM proposal if enabled and the state changed, else the first unhandled rule candidate</text>
 
   <!-- D1 -->
-  <polygon class="bx" points="400,265 550,310 400,355 250,310"/>
-  <text class="t1" x="400" y="306" text-anchor="middle">LLM enabled and</text>
-  <text class="t1" x="400" y="322" text-anchor="middle">root causes changed?</text>
-  <path class="ln-l" d="M550,310 L636,310" marker-end="url(#fl)"/>
-  <text class="tl" x="575" y="303">yes</text>
-  <path class="ln" d="M400,355 L400,401" marker-end="url(#f)"/>
-  <text class="tl" x="408" y="382">no</text>
+  <polygon class="bx" points="400,248 550,293 400,338 250,293"/>
+  <text class="t1" x="400" y="289" text-anchor="middle">LLM enabled and</text>
+  <text class="t1" x="400" y="305" text-anchor="middle">root-cause state changed?</text>
+  <path class="ln-l" d="M550,293 L632,293" marker-end="url(#fl)"/>
+  <text class="tl" x="572" y="286">yes</text>
+  <path class="ln" d="M400,338 L400,381" marker-end="url(#f)"/>
+  <text class="tl" x="408" y="364">no</text>
 
   <!-- LLM box -->
-  <rect class="bx-llm" x="640" y="262" width="320" height="110" rx="8"/>
-  <text class="t1" x="800" y="284" text-anchor="middle">LLM investigation (agent.py)</text>
-  <text class="t2" x="800" y="304" text-anchor="middle">tools: kubectl (read only), propose_fix, finish</text>
-  <text class="t2" x="800" y="321" text-anchor="middle">caps: <tspan class="mono">--max-steps</tspan> 12, <tspan class="mono">--max-tokens</tspan> 200000,</text>
-  <text class="t2" x="800" y="337" text-anchor="middle"><tspan class="mono">--max-cost</tspan> $0.50 per session</text>
-  <text class="t2" x="800" y="354" text-anchor="middle">proposal pre-checked by server dry run</text>
-  <path class="ln-l" d="M800,372 L800,450 L554,450" marker-end="url(#fl)"/>
-  <text class="tl" x="808" y="420">proposal, or finish / cap hit</text>
+  <rect class="bx-llm" x="636" y="242" width="304" height="110" rx="8"/>
+  <text class="t1" x="788" y="264" text-anchor="middle">LLM investigation (agent.py)</text>
+  <text class="t2" x="788" y="284" text-anchor="middle">tools: kubectl (read only), propose_fix, finish</text>
+  <text class="t2" x="788" y="301" text-anchor="middle">caps: <tspan class="mono">--max-steps</tspan> 12, <tspan class="mono">--max-tokens</tspan> 200000,</text>
+  <text class="t2" x="788" y="317" text-anchor="middle"><tspan class="mono">--max-cost</tspan> $0.50 per session</text>
+  <text class="t2" x="788" y="334" text-anchor="middle">proposal pre-checked by server dry run</text>
+  <path class="ln-l" d="M788,352 L788,430 L554,430" marker-end="url(#fl)"/>
+  <text class="tl" x="796" y="395">proposal, or none (finish or cap)</text>
 
   <!-- D2 -->
-  <polygon class="bx" points="400,405 550,450 400,495 250,450"/>
-  <text class="t1" x="400" y="446" text-anchor="middle">New LLM proposal, or a</text>
-  <text class="t1" x="400" y="462" text-anchor="middle">rule candidate left?</text>
-  <path class="ln" d="M400,495 L400,526" marker-end="url(#f)"/>
-  <text class="tl" x="408" y="516">yes</text>
-  <path class="ln" d="M250,450 L110,450 L110,466" marker-end="url(#f)"/>
-  <text class="tl" x="200" y="443">no</text>
+  <polygon class="bx" points="400,385 550,430 400,475 250,430"/>
+  <text class="t1" x="400" y="426" text-anchor="middle">LLM proposal, or an</text>
+  <text class="t1" x="400" y="442" text-anchor="middle">unhandled rule candidate?</text>
+  <path class="ln" d="M400,475 L400,526" marker-end="url(#f)"/>
+  <text class="tl" x="408" y="492">yes</text>
+  <path class="ln" d="M250,430 L110,430 L110,551" marker-end="url(#f)"/>
+  <text class="tl" x="180" y="423">no</text>
 
   <!-- Finish -->
-  <rect class="bx-core" x="20" y="470" width="180" height="140" rx="10"/>
-  <text class="t1" x="110" y="494" text-anchor="middle">Finish</text>
-  <text class="t2" x="110" y="514" text-anchor="middle">if fixes applied, wait</text>
-  <text class="t2" x="110" y="530" text-anchor="middle">for namespace health</text>
-  <text class="t2" x="110" y="546" text-anchor="middle">(<tspan class="mono">--verify-timeout</tspan>)</text>
-  <text class="t2" x="110" y="562" text-anchor="middle">final rules, summary,</text>
-  <text class="t2" x="110" y="578" text-anchor="middle">report.json, exit 0 if</text>
-  <text class="t2" x="110" y="594" text-anchor="middle">healthy, else 1</text>
+  <rect class="bx-core" x="20" y="555" width="180" height="180" rx="10"/>
+  <text class="t1" x="110" y="579" text-anchor="middle">Finish</text>
+  <text class="t2" x="110" y="599" text-anchor="middle">also when <tspan class="mono">--max-fixes</tspan></text>
+  <text class="t2" x="110" y="615" text-anchor="middle">(default 10) is reached</text>
+  <text class="t2" x="110" y="637" text-anchor="middle">if fixes applied, wait</text>
+  <text class="t2" x="110" y="653" text-anchor="middle">for namespace health</text>
+  <text class="t2" x="110" y="669" text-anchor="middle">(<tspan class="mono">--verify-timeout</tspan>)</text>
+  <text class="t2" x="110" y="689" text-anchor="middle">summary, report.json,</text>
+  <text class="t2" x="110" y="705" text-anchor="middle">audit footer; exit 0 if</text>
+  <text class="t2" x="110" y="721" text-anchor="middle">healthy, else 1</text>
 
   <!-- Dry run -->
   <rect class="bx-write" x="230" y="530" width="340" height="56" rx="8"/>
   <text class="t1" x="400" y="552" text-anchor="middle">Server-side dry run and diff</text>
   <text class="t2" x="400" y="572" text-anchor="middle">KubeWriter <tspan class="mono">--dry-run=server</tspan>, spec_diff before/after</text>
-  <path class="ln" d="M570,558 L636,558" marker-end="url(#f)"/>
-  <text class="tl" x="580" y="551">rejected</text>
+  <path class="ln" d="M570,558 L632,558" marker-end="url(#f)"/>
+  <text class="tl" x="577" y="551">rejected</text>
   <path class="ln" d="M400,586 L400,611" marker-end="url(#f)"/>
   <text class="tl" x="408" y="603">ok</text>
 
-  <rect class="bx" x="640" y="530" width="320" height="56" rx="8"/>
-  <text class="t1" x="800" y="552" text-anchor="middle">Record as invalid</text>
-  <text class="t2" x="800" y="572" text-anchor="middle">dry run error added to session history</text>
+  <rect class="bx" x="636" y="530" width="304" height="56" rx="8"/>
+  <text class="t1" x="788" y="552" text-anchor="middle">Record as invalid</text>
+  <text class="t2" x="788" y="572" text-anchor="middle">dry run error added to session history</text>
 
   <!-- Show proposal -->
   <rect class="bx" x="230" y="615" width="340" height="70" rx="8"/>
@@ -320,17 +323,19 @@
   <polygon class="bx" points="400,715 550,760 400,805 250,760"/>
   <text class="t1" x="400" y="756" text-anchor="middle">Apply this fix?</text>
   <text class="t1" x="400" y="772" text-anchor="middle">y / n / s / q</text>
-  <text class="tl" x="410" y="822">y (or <tspan class="mono">--yes</tspan>)</text>
+  <text class="tl" x="410" y="824">y (or <tspan class="mono">--yes</tspan>)</text>
   <path class="ln" d="M400,805 L400,836" marker-end="url(#f)"/>
-  <path class="ln" d="M550,760 L636,760" marker-end="url(#f)"/>
+  <path class="ln" d="M550,760 L632,760" marker-end="url(#f)"/>
   <text class="tl" x="574" y="753">n or s</text>
-  <path class="ln" d="M250,760 L110,760 L110,614" marker-end="url(#f)"/>
-  <text class="tl" x="160" y="753">q (quit)</text>
+  <path class="ln" d="M250,760 L110,760 L110,739" marker-end="url(#f)"/>
+  <text class="tl" x="150" y="753">q (quit)</text>
 
-  <rect class="bx" x="640" y="725" width="320" height="70" rx="8"/>
-  <text class="t1" x="800" y="747" text-anchor="middle">Record the decision</text>
-  <text class="t2" x="800" y="766" text-anchor="middle">n: rejection noted in history for the LLM</text>
-  <text class="t2" x="800" y="782" text-anchor="middle">s: finding skipped for the rest of the session</text>
+  <rect class="bx" x="636" y="705" width="314" height="110" rx="8"/>
+  <text class="t1" x="793" y="727" text-anchor="middle">Record the decision (no rule re-run)</text>
+  <text class="t2" x="793" y="747" text-anchor="middle">n: this exact patch is never offered again;</text>
+  <text class="t2" x="793" y="763" text-anchor="middle">LLM may propose a clearly better alternative</text>
+  <text class="t2" x="793" y="783" text-anchor="middle">s: the whole finding is set aside for the</text>
+  <text class="t2" x="793" y="799" text-anchor="middle">session; LLM is told to leave it alone</text>
 
   <!-- Apply -->
   <rect class="bx-write" x="230" y="840" width="340" height="56" rx="8"/>
@@ -339,24 +344,27 @@
   <path class="ln" d="M400,896 L400,921" marker-end="url(#f)"/>
 
   <!-- Verify -->
-  <rect class="bx-read" x="230" y="925" width="340" height="70" rx="8"/>
-  <text class="t1" x="400" y="947" text-anchor="middle">Verify and re-check</text>
-  <text class="t2" x="400" y="966" text-anchor="middle">rollout status, re-collect, re-run rules;</text>
-  <text class="t2" x="400" y="982" text-anchor="middle">if not resolved, new state goes to history</text>
+  <rect class="bx-read" x="230" y="925" width="340" height="56" rx="8"/>
+  <text class="t1" x="400" y="947" text-anchor="middle">Verify the rollout</text>
+  <text class="t2" x="400" y="967" text-anchor="middle">rollout status; if not resolved, note goes to history</text>
 
-  <!-- loop rail -->
-  <path class="ln" d="M400,995 L400,1015 L985,1015 L985,250 L400,250"/>
-  <path class="ln" d="M960,558 L985,558"/>
-  <path class="ln" d="M960,760 L985,760"/>
-  <text class="tl" x="600" y="1032">next round, up to <tspan class="mono">--max-fixes</tspan> (default 10)</text>
+  <!-- y return: back to the top _check() -->
+  <path class="ln-r" d="M400,981 L400,1005 L10,1005 L10,130 L226,130" marker-end="url(#fg)"/>
+  <text class="tl" x="30" y="998">after y: back to collect and rules (same <tspan class="mono">_check()</tspan>)</text>
+
+  <!-- n, s, dry run reject: back to Choose next proposal -->
+  <path class="ln" d="M940,558 L985,558"/>
+  <path class="ln" d="M950,760 L985,760 L985,212 L969,212" marker-end="url(#f)"/>
+  <text class="tl" x="980" y="842" text-anchor="end">n, s, or rejected dry run:</text>
+  <text class="tl" x="980" y="858" text-anchor="end">back to Choose next proposal, rules not re-run</text>
 
   <!-- audit footer -->
-  <rect class="bx-audit" x="20" y="1048" width="960" height="48" rx="8"/>
-  <text class="t1" x="500" y="1068" text-anchor="middle">Audit log (audit.jsonl)</text>
-  <text class="t2" x="500" y="1086" text-anchor="middle">every kubectl command (read, dry run, write, verify), every LLM call, every decision, and every result is appended as one JSON line</text>
+  <rect class="bx-audit" x="20" y="1035" width="960" height="48" rx="8"/>
+  <text class="t1" x="500" y="1055" text-anchor="middle">Audit log (audit.jsonl)</text>
+  <text class="t2" x="500" y="1073" text-anchor="middle">every kubectl command (read, dry run, write, verify), every LLM call, every decision, and every result is appended as one JSON line</text>
 </svg>
 </div>
-<p class="caption">When the LLM is on, it leads each round and sees the rule findings, the candidate fixes, and the session history. When it is off, finishes, or hits a cap, the first unhandled rule candidate is used. A fix already decided or attempted is never proposed again (fingerprint check). When the root-cause set has not changed since the LLM last had nothing to propose, the LLM is not called again for that state.</p>
+<p class="caption">Collection and rules (<code>_check()</code>) run once at the start and again only after an approved fix is applied and its rollout verified; that path loops back to the top. Every other outcome returns to Choose next proposal without re-running rules: <code>n</code> marks that exact patch as handled (fingerprint check) and tells the LLM to propose an alternative only if clearly better, <code>s</code> sets the whole finding aside for the session, and a rejected dry run is noted in the session history. When the LLM is on, it sees the rule findings, the candidate fixes, and the session history. When it is off, finishes, or hits a cap, the first unhandled rule candidate is used. When the root-cause set has not changed since the LLM last had nothing to propose, the LLM is not called again for that state. The session ends on <code>q</code>, when no proposal is left, or when <code>--max-fixes</code> is reached.</p>
 
 <h3>Proposal shown to the user</h3>
 <pre><code>Proposed fix 3   source: deterministic rule probe-port-mismatch   confidence: high
