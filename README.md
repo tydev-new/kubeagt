@@ -140,9 +140,17 @@ set it with `--llm-model` or `KUBEAGT_LLM_MODEL`, for example `KUBEAGT_LLM_MODEL
 | Base URL | `--llm-base-url` | `KUBEAGT_LLM_BASE_URL` | from the preset (`https://openrouter.ai/api/v1`) |
 | Model | `--llm-model` | `KUBEAGT_LLM_MODEL` | from the preset (`x-ai/grok-4.7`) |
 | Key variable name | `--llm-key-env` | `KUBEAGT_LLM_API_KEY_ENV` | from the preset (`OPENROUTER_API_KEY`) |
-| Turn cap per investigation | `--max-steps` | | 12 |
+| Step cap per investigation (a turn, or each kubectl call it runs) | `--max-steps` | | 12 |
 | Token cap per session | `--max-tokens` | | 200000 |
 | Spend cap per session (USD) | `--max-cost` | `KUBEAGT_PRICE_IN_PER_MTOK`, `KUBEAGT_PRICE_OUT_PER_MTOK` | 0.50 |
+
+Inside one investigation kubeagt also limits the AI's tool use (set in code, `ToolLimits` in
+`src/kubeagt/agent.py`): at most 5 tool calls per turn; after 3 failed kubectl calls in a row the AI is
+told to change approach or finish, and after 5 the investigation stops (audit event `llm_task`,
+outcome `fail`, reason "tool error limit"); an exact repeat of a call that just failed is refused
+without running it. A proposal needs a non-empty diagnosis and reasoning, an answer cut off at the
+token limit is recorded, and an empty or malformed API response stops with a clear error. See
+[docs/design.html](docs/design.html#toolloop).
 
 Flags override environment variables, which override the preset. For the spend cap kubeagt uses the
 actual cost OpenRouter reports in each response (`usage.cost`); for other providers it estimates cost

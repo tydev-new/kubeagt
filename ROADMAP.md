@@ -36,6 +36,7 @@ Priority: P1 next, P2 soon, P3 later. Size: S is under a day, M is a few days, L
 ## Done
 
 - **Log check in verify** (was item 1): before and after log diff with pass, warn, or fail, including no_signal for silent apps. See [design](docs/design.html#logcheck).
+- **Inner tool-error loop in the AI investigation**: nudge after 3 failed kubectl calls in a row, stop after 5, refuse an exact repeat of a failed call, at most 5 tool calls per turn, every executed call counts toward `--max-steps`; also required proposal fields, `finish_reason` length recorded, and clear errors for empty or malformed API responses. See [design](docs/design.html#toolloop).
 - **Realistic app for scenario 08** (was item 4): logs `FATAL: API_URL not set` and exits without its config.
 - **Standard audit schema v1** (part of item 9): one envelope for every event, shared check result, one `fix_verify` event, v0 files still readable. See [design](docs/design.html#audit).
 

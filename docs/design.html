@@ -275,17 +275,31 @@
   <polygon class="bx-auto" points="380,210 530,250 380,290 230,250"/>
   <text class="t1" x="380" y="248" text-anchor="middle">Ask the AI?</text>
   <text class="tag-auto" x="380" y="266" text-anchor="middle">kubeagt decides</text>
-  <path class="ln-l" d="M530,250 L616,250" marker-end="url(#fl)"/>
+  <path class="ln-l" d="M530,250 L596,250" marker-end="url(#fl)"/>
   <text class="tl" x="560" y="243">yes</text>
   <path class="ln" d="M380,290 L380,326" marker-end="url(#f)"/>
   <text class="tl" x="388" y="312">no: next rule fix</text>
 
   <!-- AI box -->
-  <rect class="bx-llm" x="620" y="220" width="280" height="60" rx="8"/>
-  <text class="t1" x="760" y="245" text-anchor="middle">AI investigates</text>
-  <text class="t2" x="760" y="265" text-anchor="middle">read-only kubectl, step and spend caps</text>
-  <path class="ln-l" d="M700,280 L700,370 L534,370" marker-end="url(#fl)"/>
-  <text class="tl" x="708" y="330">one proposal, or none</text>
+  <rect class="bx-llm" x="600" y="200" width="336" height="162" rx="8"/>
+  <text class="t1" x="768" y="220" text-anchor="middle">AI investigates</text>
+  <text class="t2" x="768" y="236" text-anchor="middle">step, token and spend caps; inner tool loop</text>
+  <!-- inner tool loop -->
+  <rect class="bx-llm" x="614" y="248" width="104" height="34" rx="6"/>
+  <text class="t2" x="666" y="269" text-anchor="middle">AI turn</text>
+  <path class="ln-l" d="M718,265 L800,265" marker-end="url(#fl)"/>
+  <text class="tl" x="759" y="259" text-anchor="middle">tool call</text>
+  <rect class="bx-read" x="804" y="248" width="118" height="34" rx="6"/>
+  <text class="t2" x="863" y="269" text-anchor="middle">read-only kubectl</text>
+  <path class="ln" d="M863,282 L863,293" marker-end="url(#f)"/>
+  <polygon class="bx-auto" points="863,296 903,311 863,326 823,311"/>
+  <text class="t2" x="863" y="315" text-anchor="middle">error?</text>
+  <path class="ln-l" d="M823,311 L666,311 L666,286" marker-end="url(#fl)"/>
+  <text class="tl" x="745" y="305" text-anchor="middle">result back to AI</text>
+  <text class="tl" x="768" y="340" text-anchor="middle">max 5 calls per turn; each call is one step (max 12)</text>
+  <text class="tl" x="768" y="354" text-anchor="middle">3 errors in a row: nudge; 5: stop; repeat of a failed call refused</text>
+  <path class="ln-l" d="M600,345 L566,345 L566,370 L534,370" marker-end="url(#fl)"/>
+  <text class="tl" x="542" y="394">one proposal, or none</text>
 
   <!-- D3 anything to propose (automatic) -->
   <polygon class="bx-auto" points="380,330 530,370 380,410 230,370"/>
@@ -347,7 +361,7 @@
   <text class="t2" x="750" y="596" text-anchor="middle">audit log (on disk)</text>
 
   <!-- history fed back to the AI -->
-  <path class="ln-a" d="M800,455 L800,284" marker-end="url(#fa)"/>
+  <path class="ln-a" d="M800,455 L800,366" marker-end="url(#fa)"/>
   <text class="tl-a" x="792" y="418" text-anchor="end">past outcomes fed back so</text>
   <text class="tl-a" x="792" y="432" text-anchor="end">the AI does not repeat them</text>
 
@@ -376,8 +390,20 @@
   </g>
 </svg>
 </div>
-<p class="caption">kubeagt makes the gray decisions on its own; you make the blue one. Every outcome goes into Record the outcome first: a rejected dry run, your <code>n</code> or <code>skip</code>, a failed apply, and a verify that passed or failed together with the new error state. From there, after a rejected dry run, <code>n</code>, or <code>skip</code>, nothing in the cluster changed, so the loop returns to Any errors left without re-running the rules. After an apply, whether it failed or the fix was applied and its rollout checked, the loop goes back to the top to re-collect and re-run the rules, once per apply. Verify runs three checks in order: the rollout completed, the post-fix log check described below, and the rule the fix addressed no longer fires. It fails if any check fails and passes as verified with warnings when the log check warns. Each proposal gets exactly one server dry run. Any errors left counts root-cause findings you have not skipped; symptoms linked to a root cause do not count, and this check is also where <code>--max-fixes</code> (default 10) stops the session. That cap counts applied fixes (apply attempts, ok or failed), not proposals. A separate guard stops the session after 3 times <code>--max-fixes</code> proposals (at least 10), so rejected, declined, or repeated proposals cannot loop forever. Ask the AI is yes when an AI provider is configured and the set of open errors changed since the AI last had nothing to propose. The AI investigates with read-only kubectl, up to <code>--max-steps</code> (12) turns per investigation and <code>--max-tokens</code> (200000) and <code>--max-cost</code> ($0.50) for the whole session. It receives the rule findings except the ones you skipped, the rule fixes not yet tried, and the last 10 session history entries, and it can propose patches to Deployments, StatefulSets, DaemonSets, Services, ConfigMaps, and PVCs. If it proposes nothing or hits a cap, the next untried rule fix is used. If it repeats a patch already tried, that is recorded as a rejected repeat and the loop returns to Any errors left; the AI is not asked again until the open errors change. An error with no rule fix, such as a missing ConfigMap, is reported but only fixed if the AI proposes something you approve. Session history is kept in memory for this session only and fed back to the AI; the same events, plus every kubectl command and AI call, are appended to the audit log on disk. Separately, a patch already decided or attempted is never proposed again, because kubeagt blocks it by fingerprint. <code>n</code> rejects that exact patch and the AI may suggest a clearly better one; <code>skip</code> sets the whole error aside for the session; <code>quit</code> ends it; <code>--yes</code> answers <code>y</code> to every proposal. Finish waits up to <code>--verify-timeout</code> (120 seconds) for the namespace to become healthy if any fix was applied, then prints the summary and writes <code>report.json</code> and the audit log. The exit code is 0 only if the namespace is healthy.</p>
+<p class="caption">kubeagt makes the gray decisions on its own; you make the blue one. Every outcome goes into Record the outcome first: a rejected dry run, your <code>n</code> or <code>skip</code>, a failed apply, and a verify that passed or failed together with the new error state. From there, after a rejected dry run, <code>n</code>, or <code>skip</code>, nothing in the cluster changed, so the loop returns to Any errors left without re-running the rules. After an apply, whether it failed or the fix was applied and its rollout checked, the loop goes back to the top to re-collect and re-run the rules, once per apply. Verify runs three checks in order: the rollout completed, the post-fix log check described below, and the rule the fix addressed no longer fires. It fails if any check fails and passes as verified with warnings when the log check warns. Each proposal gets exactly one server dry run. Any errors left counts root-cause findings you have not skipped; symptoms linked to a root cause do not count, and this check is also where <code>--max-fixes</code> (default 10) stops the session. That cap counts applied fixes (apply attempts, ok or failed), not proposals. A separate guard stops the session after 3 times <code>--max-fixes</code> proposals (at least 10), so rejected, declined, or repeated proposals cannot loop forever. Ask the AI is yes when an AI provider is configured and the set of open errors changed since the AI last had nothing to propose. The AI investigates with read-only kubectl, up to <code>--max-steps</code> (12) steps per investigation and <code>--max-tokens</code> (200000) and <code>--max-cost</code> ($0.50) for the whole session. Inside the investigation an inner tool loop (described below) limits tool calls per turn and stops the AI when its kubectl calls keep failing. It receives the rule findings except the ones you skipped, the rule fixes not yet tried, and the last 10 session history entries, and it can propose patches to Deployments, StatefulSets, DaemonSets, Services, ConfigMaps, and PVCs. If it proposes nothing or hits a cap, the next untried rule fix is used. If it repeats a patch already tried, that is recorded as a rejected repeat and the loop returns to Any errors left; the AI is not asked again until the open errors change. An error with no rule fix, such as a missing ConfigMap, is reported but only fixed if the AI proposes something you approve. Session history is kept in memory for this session only and fed back to the AI; the same events, plus every kubectl command and AI call, are appended to the audit log on disk. Separately, a patch already decided or attempted is never proposed again, because kubeagt blocks it by fingerprint. <code>n</code> rejects that exact patch and the AI may suggest a clearly better one; <code>skip</code> sets the whole error aside for the session; <code>quit</code> ends it; <code>--yes</code> answers <code>y</code> to every proposal. Finish waits up to <code>--verify-timeout</code> (120 seconds) for the namespace to become healthy if any fix was applied, then prints the summary and writes <code>report.json</code> and the audit log. The exit code is 0 only if the namespace is healthy.</p>
 
+
+<h3 id="toolloop">AI investigation: inner tool loop</h3>
+<p><em>Status: implemented</em> (<code>src/kubeagt/agent.py</code>, limits in <code>ToolLimits</code>). Each AI turn may call tools; kubeagt runs the kubectl calls through the read-only path and sends each result back. The loop has these limits:</p>
+<table>
+<tr><th>Limit</th><th>Default</th><th>What happens</th></tr>
+<tr><td>Step budget</td><td>12 (<code>--max-steps</code>)</td><td>A turn uses one step, or one step per kubectl call it ran when it ran any, so batching calls in one turn cannot bypass the cap. Calls past the budget are answered "step budget used up" and not run.</td></tr>
+<tr><td>Tool calls per turn</td><td>5</td><td>Calls beyond the fifth get <code>ERROR: too many tool calls in one turn</code> and are not run.</td></tr>
+<tr><td>Errors in a row: nudge</td><td>3</td><td>A refused call, an error, or a non-zero kubectl exit counts as an error; a successful call resets the count. After 3 in a row kubeagt tells the AI to change approach or call finish.</td></tr>
+<tr><td>Errors in a row: stop</td><td>5</td><td>The investigation stops. An <code>llm_task</code> event records outcome <code>fail</code>, reason "tool error limit", and the last errors. The fix loop then falls back to the next rule fix, as for any other AI stop.</td></tr>
+<tr><td>Repeat of a failed call</td><td>always</td><td>An exact repeat (same arguments) of a call that failed in the current error streak is refused without running it, and counts as an error.</td></tr>
+</table>
+<p>kubeagt also rejects a <code>propose_fix</code> with an empty diagnosis or reasoning (the AI gets the reason and may try again), records <code>finish_reason</code> on every <code>llm_call</code> event (outcome <code>warn</code> when the answer was cut off at the token limit), and stops with a clear error when the API returns an empty or malformed response.</p>
 
 <h3 id="logcheck">Verify: log check</h3>
 <p><em>Status: implemented</em> (<code>src/kubeagt/logcheck.py</code>). A rollout that completes and a rule that stops firing do not prove the app works. The log check is the standard middle step of Verify for every applied fix: rollout check, log check, rule re-check.</p>

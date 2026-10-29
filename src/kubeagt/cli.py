@@ -42,7 +42,7 @@ def _llm_args(p: argparse.ArgumentParser) -> None:
     g.add_argument("--llm-model", help=f"override the preset model ($KUBEAGT_LLM_MODEL; OpenRouter default {DEFAULT_MODEL}, "
                                        "check https://openrouter.ai/models for current slugs)")
     g.add_argument("--llm-key-env", help="name of the env var holding the API key (preset default, e.g. OPENROUTER_API_KEY)")
-    g.add_argument("--max-steps", type=int, default=12, help="max LLM turns per investigation (default 12)")
+    g.add_argument("--max-steps", type=int, default=12, help="max steps per investigation: one per AI turn, or one per kubectl call the turn runs (default 12)")
     g.add_argument("--max-tokens", type=int, default=200_000, help="token cap for the whole session (default 200000)")
     g.add_argument("--max-cost", type=float, default=0.50, help="estimated spend cap in USD for the session (default 0.50)")
 
