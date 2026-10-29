@@ -59,7 +59,7 @@ def test_relay_round_trip_reads_then_proposes(tmp_path):
     assert first["messages"][0]["role"] == "system" and first["messages"][1]["content"] == "ns demo"
     assert {t["function"]["name"] for t in first["tools"]} == {"kubectl", "propose_fix", "finish"}
     calls = [json.loads(line) for line in audit_path.read_text().splitlines() if '"llm_call"' in line]
-    assert len(calls) == 2 and all(c["model"] == RELAY_NAME for c in calls)
+    assert len(calls) == 2 and all(c["detail"]["model"] == RELAY_NAME and c["actor"] == "ai" for c in calls)
 
 
 def test_relay_name_says_not_grok():

@@ -15,7 +15,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Callable, List, Optional, Set
 
 from .agent import Budget, Investigator, Proposal
-from .audit import NULL_AUDIT, AuditLog
+from .audit import NULL_AUDIT, AuditLog, check_result
+from . import logcheck
 from .bundle import Bundle, KIND_FILE
 from .findings import Finding, Fix
 from .health import health, wait_healthy
@@ -60,8 +61,9 @@ class FixRecord:
     patch: object
     decision: str
     applied: bool = False
-    verified: bool = False
+    verified: bool = False          # true for verified and verified_with_warnings
     status: str = ""
+    verify_result: str = ""         # verified | verified_with_warnings | failed (empty when not applied)
 
 
 @dataclass
@@ -96,11 +98,14 @@ class FixSession:
                  max_fixes: int = 10, verify_timeout: float = 120, settle_timeout: float = 15,
                  min_memory_mib: float = MIN_MEMORY_MIB, dry_run_validate: bool = True,
                  health_snapshot: Optional[Callable[[], Bundle]] = None, sleep: Callable[[float], None] = time.sleep,
-                 max_proposals: Optional[int] = None, policy_checks: Optional[list] = None):
+                 max_proposals: Optional[int] = None, policy_checks: Optional[list] = None,
+                 log_source=None, log_watch_seconds: float = logcheck.DEFAULT_WINDOW):
         self.ns, self.context = namespace, context
         self.snapshot, self.writer, self.kc = snapshot, writer, kubectl
         self.health_snapshot = health_snapshot or snapshot
         self.audit, self.llm, self.llm_cfg = audit, llm, llm_cfg
+        if audit.path and audit.namespace is None:
+            audit.namespace = namespace
         self.budget = budget or Budget()
         self.ask, self.yes, self.out = ask, yes, out
         # max_fixes caps applied fixes (apply attempts). max_proposals is a separate guard so a model that keeps
@@ -111,17 +116,37 @@ class FixSession:
         self.dry_run_validate = dry_run_validate
         self.sleep = sleep
         self.policy_checks = policy_checks          # None means the default registry (empty for now)
+        # Log check source: the real read-only kubectl by default. Test doubles without logs get none (check skipped).
+        self.log_source = log_source if log_source is not None else (
+            logcheck.KubeLogSource(kubectl) if hasattr(kubectl, "fetch_logs") else None)
+        self.log_watch_seconds = log_watch_seconds
         self.handled: Set[str] = set()      # fix fingerprints already decided or attempted
         self.skipped: Set[str] = set()      # finding keys the user skipped
         self.history: List[str] = []        # session history, fed back to the LLM
         self.dry_run_cache: dict = {}       # fix fingerprint -> CompletedProcess of its one server dry run
         self.llm_idle_state: Optional[frozenset] = None
+        self._cur_n: Optional[int] = None    # proposal being prompted, for prompt events
+        self._cur_t: Optional[str] = None
+
+    def _ev(self, event: str, rec: "FixRecord", actor: str = "kubeagt", outcome: str = "n/a", reason: str = "",
+            check: Optional[dict] = None, **extra) -> None:
+        """Write one event about a proposal: the envelope plus the fix record (and a check result) as detail."""
+        d = _rec_dict(rec)
+        d.pop("n", None)
+        d.pop("target", None)
+        if check is not None:
+            outcome, reason = check["outcome"], check["reason"]
+            d.update(check)
+        d.update(extra)
+        self.audit.emit(event, d, fix_n=rec.n, target=rec.target, actor=actor, outcome=outcome, reason=reason)
 
     # ------------------------------------------------------------ helpers
     def _check(self, final: bool = False) -> tuple:
         b = self.snapshot()
         found = run_rules(b, self.min_memory_mib)
-        self.audit.write("rule_check", final=final, root_causes=sorted(f.key() for f in found if f.root_cause))
+        roots = sorted(f.key() for f in found if f.root_cause)
+        self.audit.write("rule_check", actor="rules", outcome="fail" if roots else "ok",
+                         reason=f"{len(roots)} root cause(s)" if roots else "", final=final, root_causes=roots)
         return b, found
 
     def _prompt(self) -> str:
@@ -131,13 +156,15 @@ class FixSession:
                 raw = self.ask(PROMPT)
             except EOFError:
                 self.out("  end of input: treating as quit, nothing applied")
-                self.audit.write("prompt_eof")
+                self.audit.write("prompt", fix_n=self._cur_n, target=self._cur_t, actor="user", outcome="n/a",
+                                 reason="end of input", eof=True)
                 return "quit"
             a = str(raw).strip().lower()
             if a in ANSWERS:
                 return ANSWERS[a]
             self.out("  please answer y, n, s, or q")
-            self.audit.write("prompt_invalid", answer=redact_text(str(raw))[:40])
+            self.audit.write("prompt", fix_n=self._cur_n, target=self._cur_t, actor="user", outcome="warn",
+                             reason="invalid answer", answer=redact_text(str(raw))[:40])
         self.out("  too many invalid answers: treating as quit")
         return "quit"
 
@@ -231,7 +258,7 @@ class FixSession:
                     self.out(f"\nThe LLM repeated a fix already tried on {rec.target}; recorded and not shown again.")
                     self.history.append(f"fix '{fix.summary}' on {rec.target} was rejected because it repeats a patch "
                                         "already tried; propose something different or finish")
-                    self.audit.write("fix_repeat", **_rec_dict(rec))
+                    self._ev("proposal", rec, outcome="block", reason=rec.status)
                     rep.fixes.append(rec)
                     self.llm_idle_state = state
                     continue
@@ -259,28 +286,37 @@ class FixSession:
             live = bundle.get(KIND_FILE.get(fix.kind, fix.kind.lower() + "s"), fix.name)
             pol = policy.evaluate(proposal, live, policy.PolicyContext(self.ns, self.context, list(self.history)),
                                   self.policy_checks)
-            self.audit.write("policy_check", n=n, target=rec.target, **pol)
+            self._ev("proposal", rec, actor="ai" if fix.source == "llm" else "rules", outcome="ok")
+            self._ev("policy_check", rec, check=check_result(
+                "policy_check", "block" if not pol["allow"] else "warn" if pol.get("warnings") else "ok", pol.get("reason") or "",
+                pol.get("warnings") or [], 0, allow=pol["allow"], checks_run=pol.get("checks_run", [])))
             if not pol["allow"]:
                 rec.decision, rec.status = "blocked", f"blocked by policy: {pol['reason']}"
                 self.out(f"\nNot showing a proposed fix for {rec.target}: {rec.status}")
                 self.history.append(f"fix '{fix.summary}' on {rec.target} was blocked by policy: {pol['reason']}")
-                self.audit.write("fix_blocked", **_rec_dict(rec))
                 rep.fixes.append(rec)
                 continue                                       # no rule re-run
+            t_dr = time.time()
             before, after, err = self._after(bundle, fix)      # Server dry run (once per proposal)
+            dr_outcome = "fail" if err else ("ok" if self.dry_run_validate else "skip")
+            self._ev("dry_run", rec, check=check_result(
+                "dry_run", dr_outcome, err or ("" if self.dry_run_validate else "dry run disabled"),
+                [err] if err else [], time.time() - t_dr))
             if err:
                 rec.decision, rec.status = "invalid", f"patch rejected by dry run: {err}"
                 self.out(f"\nSkipping a proposed fix for {rec.target}: {rec.status}")
                 self.history.append(f"fix '{fix.summary}' on {rec.target} was rejected by server dry run: {err}")
-                self.audit.write("fix_invalid", **_rec_dict(rec))
                 rep.fixes.append(rec)
                 continue                                       # no rule re-run
             self._print_proposal(n, proposal, finding, before, after, len(cands))
+            self._cur_n, self._cur_t = n, rec.target
             decision = "yes" if self.yes else self._prompt()
             if self.yes:
                 self.out(PROMPT + "y   (auto-approved by --yes)")
             rec.decision = decision
-            self.audit.write("decision", **_rec_dict(rec))
+            self._ev("decision", rec, actor="kubeagt" if self.yes else "user",
+                     outcome={"yes": "ok", "no": "fail", "skip": "skip"}.get(decision, "n/a"),
+                     reason="auto-approved by --yes" if self.yes else "", answer=decision)
             if decision == "quit":
                 rep.fixes.append(rec)
                 rep.stopped = "user quit"
@@ -313,7 +349,7 @@ class FixSession:
         rep.llm_cost_usd = round(self.budget.cost_usd, 5)
         rep.seconds = round(time.time() - t0, 1)
         self._print_summary(rep)
-        self.audit.write("session_end", healthy=ok, problems=problems, stopped=rep.stopped,
+        self.audit.write("session_end", outcome="ok" if ok else "fail", reason=rep.stopped or "", healthy=ok, problems=problems, stopped=rep.stopped,
                          skipped=sorted(self.skipped), open_findings=[f.key() for f in findings if f.root_cause], fixes=[_rec_dict(r) for r in rep.fixes], seconds=rep.seconds)
         return rep
 
@@ -331,43 +367,90 @@ class FixSession:
         return None
 
     def _apply_and_verify(self, rec: FixRecord, fix: Fix, finding: Optional[Finding], cands: List[Finding]) -> tuple:
-        """Apply, verify, record. Returns the one fresh (bundle, findings) taken after the apply attempt."""
+        """Apply, verify, record. Returns the one fresh (bundle, findings) taken after the apply attempt.
+
+        Verify runs three checks and records them in one fix_verify event: rollout_check, log_check
+        (new log lines since the baseline taken just before the apply), and rule_recheck."""
+        base = logcheck.capture_baseline(self.log_source, fix.kind, fix.name)
         cp = self.writer.patch(fix.kind, fix.name, fix.patch_type, fix.patch)
         if cp.returncode != 0:
             rec.status = "apply failed: " + redact_text((cp.stderr or cp.stdout).strip())[:300]
             self.out(f"  {rec.status}")
             self.history.append(f"applying '{fix.summary}' on {rec.target} failed: {rec.status}")
-            self.audit.write("fix_apply_failed", **_rec_dict(rec))
+            self._ev("fix_apply", rec, outcome="fail", reason=rec.status)
             return self._check()
         rec.applied = True
         self.out(f"  applied: {(cp.stdout or '').strip()}")
-        self.audit.write("fix_applied", **_rec_dict(rec))
+        self._ev("fix_apply", rec, outcome="ok")
         pending_same = [f for f in cands if f.target == rec.target and f.fix and f.fix.fingerprint() != fix.fingerprint()]
         timeout = self.settle_timeout if pending_same else self.verify_timeout
         self.out(f"  verifying: waiting up to {int(timeout)}s for rollout of {rec.target}...")
+        t = time.time()
         rs = self.writer.rollout_status(fix.kind, fix.name, timeout=int(timeout))
+        roll = check_result("rollout_check", "ok" if rs.returncode == 0 else "fail",
+                            "" if rs.returncode == 0 else "rollout did not complete",
+                            [] if rs.returncode == 0 else [redact_text((rs.stderr or rs.stdout or "").strip())[:300]],
+                            time.time() - t)
+        # Log check: watch the full window only after a completed rollout; otherwise just read what is there.
+        window = self.log_watch_seconds if rs.returncode == 0 else 0
+        if window and self.log_source is not None:
+            self.out(f"  verifying: watching logs of {rec.target} for {int(window)}s...")
+        logs = logcheck.run_log_check(self.log_source, fix.kind, fix.name, base, window, self.sleep)
+        self._ev("log_check", rec, check=logs)
+        t = time.time()
         b, nf = self._check()
         still = bool(finding) and any(f.key() == finding.key() for f in nf)
         target_issues = [f for f in nf if f.target == rec.target and f.root_cause]
-        # Verified only when the rollout completed AND the finding this fix addressed is gone.
+        rule = check_result("rule_recheck", "fail" if still else "ok",
+                            f"rule {finding.rule} still fires on {rec.target}" if still else "",
+                            [f"{f.rule} on {f.target}: {f.title}" for f in target_issues], time.time() - t)
+        checks = [roll, logs, rule]
+        if any(c["outcome"] == "fail" for c in checks):
+            result = "failed"
+        elif logs["outcome"] == "warn":
+            result = "verified_with_warnings"
+        else:
+            result = "verified"
+        rec.verify_result = result
+        rec.verified = result != "failed"
+        # Human-readable status (kept compatible with earlier wording).
         if still:
             rec.status = f"verify failed: rule {finding.rule} still fires on {rec.target}"
-        elif rs.returncode == 0:
-            rec.verified = True
-            rec.status = "verified: rollout complete" + ("" if not target_issues else f"; {len(target_issues)} other issue(s) remain")
-        else:
+        elif rs.returncode != 0:
             rec.status = "verify failed: rollout did not complete"
             if target_issues:
                 rec.status += "; blocked by other issue(s): " + ", ".join(sorted({f.rule for f in target_issues}))
             else:
                 rec.status += ": " + redact_text((rs.stderr or rs.stdout or "").strip())[:200]
-        self.out(f"  {rec.status}")
+            if logs["outcome"] == "fail":
+                rec.status += f"; log check: {logs['reason']}"
+        elif logs["outcome"] == "fail":
+            rec.status = f"verify failed: log check: {logs['reason']}"
+        else:
+            rec.status = ("verified with warnings: rollout complete; log check: " + logs["reason"]
+                          if result == "verified_with_warnings" else "verified: rollout complete")
+            if target_issues:
+                rec.status += f"; {len(target_issues)} other issue(s) remain"
+        self.out(f"  verify: {result.replace('_', ' ')}")
+        for c in checks:
+            self.out(f"    {c['check']}: {c['outcome']}" + (f": {c['reason']}" if c["reason"] else ""))
+            if c["check"] == "log_check" and c["outcome"] in ("warn", "fail"):
+                for e in c["evidence"][:5]:
+                    self.out(f"      | {e}")
+        log_note = ""
+        if logs["outcome"] in ("warn", "fail"):
+            log_note = f" Log check {logs['outcome']}: {logs['reason']}" + (
+                f"; lines: {logcheck.summarize(logs['evidence'])}" if logs["evidence"] else "")
         if not rec.verified:
             new_state = "; ".join(f"{f.rule} on {f.target}: {f.title}" for f in nf if f.root_cause) or "no rule findings"
-            self.history.append(f"applied '{fix.summary}' on {rec.target} but verification failed ({rec.status}). New state: {new_state}")
+            self.history.append(f"applied '{fix.summary}' on {rec.target} but verification failed ({rec.status}).{log_note} "
+                                f"New state: {new_state}")
+        elif result == "verified_with_warnings":
+            self.history.append(f"applied '{fix.summary}' on {rec.target}: verified with warnings.{log_note}")
         else:
             self.history.append(f"applied and verified '{fix.summary}' on {rec.target}")
-        self.audit.write("fix_verified" if rec.verified else "fix_verify_failed", **_rec_dict(rec))
+        self._ev("fix_verify", rec, outcome={"verified": "ok", "verified_with_warnings": "warn"}.get(result, "fail"),
+                 reason=rec.status, result=result, checks=checks)
         return b, nf
 
     # ------------------------------------------------------------ output
@@ -417,6 +500,8 @@ class FixSession:
             o("  no fixes proposed")
         for r in rep.fixes:
             o(f"  {r.n}. {r.target}: {r.summary}  [{r.decision}{', applied' if r.applied else ''}]  {r.status}")
+            if r.verify_result:
+                o(f"     verify result: {r.verify_result}")
         o(f"  namespace healthy: {'yes' if rep.healthy else 'no'}")
         for p in rep.problems[:8]:
             o(f"    - {p}")

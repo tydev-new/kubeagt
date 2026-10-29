@@ -7,4 +7,6 @@ expected_fixes:
   - target: Deployment/worker
     checks:
       - {path: spec.template.spec.nodeSelector, absent: true}
+expect_verify:
+  - {result: verified, log_check: ok}
 expect_healthy: true

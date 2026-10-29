@@ -110,7 +110,7 @@ def test_llm_alternative_after_rejection_and_audit_redaction(tmp_path):
     log = (tmp_path / "audit.jsonl").read_text()
     assert "hunter2" not in log
     events = [json.loads(line)["event"] for line in log.splitlines()]
-    assert "decision" in events and "fix_applied" in events and "session_end" in events
+    assert "decision" in events and "fix_apply" in events and "session_end" in events
 
 
 def test_failed_verification_is_fed_back():
@@ -234,7 +234,7 @@ def test_repeated_ai_patch_is_recorded_and_loop_continues(tmp_path):
     assert rep.fixes[1].status.startswith("rejected: repeats") and rep.fixes[2].source == "rule"
     assert rep.healthy and len(fc.applied) == 1
     events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
-    assert any(e["event"] == "fix_repeat" for e in events)
+    assert any(e["event"] == "proposal" and e["outcome"] == "block" for e in events)
     assert any("repeats a patch already tried" in h for h in sess.history)  # in session history for the AI
     assert len(llm.calls) == 2  # after the repeat the AI is not re-asked until the open errors change
 

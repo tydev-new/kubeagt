@@ -16,12 +16,12 @@ from typing import Any, Callable, Dict, List, Optional
 import yaml
 
 from .agent import Budget
-from .audit import AuditLog
+from .audit import AuditLog, read_events, tstr
 from .bundle import collect
 from .fixer import FixSession, scripted_ask
 from .health import HEALTH_KINDS
 from .kube import KubeTarget, KubeWriter, ReadOnlyKubectl
-from .llm import LLMConfig, make_client
+from .llm import LLMConfig, ScriptedLLM, make_client, tool_call
 from .rules import run_rules
 
 NS_PREFIX = "kubeagt-eval-"
@@ -146,12 +146,57 @@ class EvalOptions:
     relay_dir: Optional[str] = None
     relay_timeout: float = 900.0
     node_baseline: Optional[Dict[str, Dict[str, str]]] = None
+    log_watch_seconds: float = 30.0
 
 
 def _events(path: Path) -> List[dict]:
-    if not path.exists():
-        return []
-    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    """Audit events in the version 1 envelope (version 0 files are upgraded on read)."""
+    return read_events(path)
+
+
+def _count(ev: List[dict], key: str) -> int:
+    """Count events by name, or by 'name:outcome' (for example 'prompt:warn' or 'fix_apply:ok')."""
+    name, _, outcome = key.partition(":")
+    return sum(1 for e in ev if e["event"] == name and (not outcome or e["outcome"] == outcome))
+
+
+def check_verify(spec: dict, ev: List[dict]) -> List[dict]:
+    """expect_verify: a list matched in order against the fix_verify events. Each item may set
+    result, log_check (outcome), reason_contains, evidence_contains, no_signal."""
+    checks: List[dict] = []
+    vs = [e for e in ev if e["event"] == "fix_verify"]
+    for i, want in enumerate(spec.get("expect_verify") or []):
+        if i >= len(vs):
+            checks.append({"ok": False, "check": f"fix_verify #{i + 1} recorded (got {len(vs)})"})
+            continue
+        d = vs[i]["detail"]
+        lc = next((c for c in d.get("checks", []) if c["check"] == "log_check"), {})
+        if "result" in want:
+            checks.append({"ok": d.get("result") == want["result"], "check": f"verify #{i + 1} result {want['result']} (got {d.get('result')})"})
+        if "log_check" in want:
+            checks.append({"ok": lc.get("outcome") == want["log_check"], "check": f"log_check #{i + 1} {want['log_check']} (got {lc.get('outcome')}: {lc.get('reason')})"})
+        if "no_signal" in want:
+            checks.append({"ok": bool(lc.get("no_signal")) == bool(want["no_signal"]), "check": f"log_check #{i + 1} no_signal {want['no_signal']} (got {lc.get('no_signal')})"})
+        if "reason_contains" in want:
+            checks.append({"ok": want["reason_contains"] in (lc.get("reason") or ""), "check": f"log_check #{i + 1} reason contains {want['reason_contains']!r} (got {lc.get('reason')!r})"})
+        if "evidence_contains" in want:
+            checks.append({"ok": any(want["evidence_contains"] in x for x in lc.get("evidence", [])), "check": f"log_check #{i + 1} evidence contains {want['evidence_contains']!r}"})
+    return checks
+
+
+def scripted_ai(spec: dict) -> Optional[ScriptedLLM]:
+    """A scenario can script the AI (scripted_ai: list of propose_fix argument objects) to test how
+    kubeagt handles a specific proposal, for example one that hides a symptom. Same in every LLM mode."""
+    steps = spec.get("scripted_ai")
+    if not steps:
+        return None
+    script = [{"role": "assistant", "content": None, "tool_calls": [tool_call("propose_fix", a, f"s{i}")]}
+              for i, a in enumerate(steps)]
+    script += [{"role": "assistant", "content": None, "tool_calls": [tool_call("finish", {"summary": "scripted: done"}, f"f{i}")]}
+               for i in range(5)]
+    llm = ScriptedLLM(script, usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+    llm.name = "scripted AI (scenario)"
+    return llm
 
 
 def check_human(spec: dict, mode: str, ev: List[dict], rep, before: Dict[str, Any], after: Dict[str, Any]) -> List[dict]:
@@ -166,11 +211,11 @@ def check_human(spec: dict, mode: str, ev: List[dict], rep, before: Dict[str, An
         checks.append({"ok": bool(ok), "check": msg})
 
     decisions = [e for e in ev if e["event"] == "decision"]
-    got = [e["decision"] for e in decisions]
+    got = [e["detail"]["answer"] for e in decisions]
     if "decisions" in exp:
         add(got == exp["decisions"], f"decisions {exp['decisions']} (got {got})")
     for name, want in (exp.get("events") or {}).items():
-        n = sum(1 for e in ev if e["event"] == name)
+        n = _count(ev, name)
         add(n == want, f"audit {name} x{want} (got {n})")
     if "stopped" in exp:
         add(exp["stopped"] in (rep.stopped or ""), f"stopped contains {exp['stopped']!r} (got {rep.stopped!r})")
@@ -184,23 +229,24 @@ def check_human(spec: dict, mode: str, ev: List[dict], rep, before: Dict[str, An
     for d in decisions:
         i = idx[id(d)]
         nxt = next((j for j in range(i + 1, len(ev)) if ev[j]["event"] in ("decision", "session_end")), len(ev))
-        if d["decision"] in ("no", "skip"):
-            rc = sum(1 for e in ev[i + 1:nxt] if e["event"] == "rule_check" and not e.get("final"))
-            add(rc == 0, f"no rule re-run after {d['decision']} on fix {d['n']} (got {rc})")
-        if d["decision"] == "skip" and d.get("rule"):
-            key = f"{d['rule']}:{d['target']}:"
-            leaked = [e for e in ev[i + 1:] if e["event"] == "llm_task" and any(k.startswith(key) for k in e["findings"])]
-            add(not leaked, f"skipped {d['rule']} not sent to the AI again (got {len(leaked)} task(s))")
-        if d["decision"] == "quit":
-            writes = [e for e in ev[i + 1:] if e["event"] == "kubectl" and e.get("path") in ("write", "write-dryrun")
-                      or e["event"] in ("fix_applied", "decision")]
+        ans, dd = d["detail"]["answer"], d["detail"]
+        if ans in ("no", "skip"):
+            rc = sum(1 for e in ev[i + 1:nxt] if e["event"] == "rule_check" and not e["detail"].get("final"))
+            add(rc == 0, f"no rule re-run after {ans} on fix {d['fix_n']} (got {rc})")
+        if ans == "skip" and dd.get("rule"):
+            key = f"{dd['rule']}:{tstr(d['target'])}:"
+            leaked = [e for e in ev[i + 1:] if e["event"] == "llm_task" and any(k.startswith(key) for k in e["detail"]["findings"])]
+            add(not leaked, f"skipped {dd['rule']} not sent to the AI again (got {len(leaked)} task(s))")
+        if ans == "quit":
+            writes = [e for e in ev[i + 1:] if e["event"] == "kubectl" and e["detail"].get("path") in ("write", "write-dryrun")
+                      or e["event"] in ("fix_apply", "decision")]
             add(not writes, f"nothing proposed or written after quit (got {len(writes)})")
-    fps = [json.dumps([d["target"], d["patch_type"], d["patch"]], sort_keys=True) for d in decisions]
+    fps = [json.dumps([tstr(d["target"]), d["detail"]["patch_type"], d["detail"]["patch"]], sort_keys=True) for d in decisions]
     add(len(fps) == len(set(fps)), "no patch offered twice")
-    attempts = sum(1 for e in ev if e["event"] in ("fix_applied", "fix_apply_failed"))
-    applied = sum(1 for e in ev if e["event"] == "fix_applied")
-    rc_loop = sum(1 for e in ev if e["event"] == "rule_check" and not e.get("final"))
-    rc_final = sum(1 for e in ev if e["event"] == "rule_check" and e.get("final"))
+    attempts = _count(ev, "fix_apply")
+    applied = _count(ev, "fix_apply:ok")
+    rc_loop = sum(1 for e in ev if e["event"] == "rule_check" and not e["detail"].get("final"))
+    rc_final = sum(1 for e in ev if e["event"] == "rule_check" and e["detail"].get("final"))
     add(rc_loop == 1 + attempts, f"loop rule checks = 1 + apply attempts ({1 + attempts}, got {rc_loop})")
     add(rc_final == (1 if applied else 0), f"final report check only after an apply ({1 if applied else 0}, got {rc_final})")
     return checks
@@ -225,7 +271,9 @@ def run_scenario(sdir: Path, opt: EvalOptions, out_dir: Path, log: Callable[[str
 
     sess_dir = out_dir / name
     sess_dir.mkdir(parents=True, exist_ok=True)
-    audit = AuditLog(sess_dir / "audit.jsonl")
+    if (sess_dir / "audit.jsonl").exists():
+        (sess_dir / "audit.jsonl").unlink()
+    audit = AuditLog(sess_dir / "audit.jsonl", session_id=f"eval-{name}", namespace=ns)
     target = KubeTarget(ns, opt.context, opt.kubeconfig)
     kc = ReadOnlyKubectl(target, audit)
     writer = KubeWriter(target, audit)
@@ -253,10 +301,11 @@ def run_scenario(sdir: Path, opt: EvalOptions, out_dir: Path, log: Callable[[str
         return res
 
     before = snap_targets()
-    llm = make_client(opt.llm_mode, opt.llm_cfg or LLMConfig.from_env(), opt.relay_dir, opt.relay_timeout)
+    llm = scripted_ai(spec) or make_client(opt.llm_mode, opt.llm_cfg or LLMConfig.from_env(), opt.relay_dir, opt.relay_timeout)
     ask_kw = {"ask": scripted_ask(spec["answers"]), "yes": False} if human else {"yes": True}
     sess = FixSession(ns, kc.current_context(), lambda: collect(kc), writer, kc, audit, llm=llm, llm_cfg=opt.llm_cfg,
                       budget=Budget(max_steps=opt.max_steps), out=out, verify_timeout=opt.verify_timeout, **ask_kw,
+                      log_watch_seconds=opt.log_watch_seconds,
                       health_snapshot=lambda: collect(kc, kinds=HEALTH_KINDS, with_logs=False, with_secrets=False))
     rep = sess.run()
     elapsed = time.time() - t0
@@ -278,8 +327,16 @@ def run_scenario(sdir: Path, opt: EvalOptions, out_dir: Path, log: Callable[[str
     expect_healthy = bool(spec.get("expect_healthy", True))
     healthy_ok = rep.healthy == expect_healthy
     steps = len(rep.fixes) + rep.tool_steps
-    human_checks = check_human(spec, opt.llm_mode, _events(sess_dir / "audit.jsonl"), rep, before, snap_targets()) if human else []
+    ev = _events(sess_dir / "audit.jsonl")
+    human_checks = check_human(spec, opt.llm_mode, ev, rep, before, snap_targets()) if human else []
     human_ok = all(c["ok"] for c in human_checks)
+    verify_checks = check_verify(spec, ev)
+    verify_ok = all(c["ok"] for c in verify_checks)
+    verify_results = []
+    for e in (x for x in ev if x["event"] == "fix_verify"):
+        lc = next((c for c in e["detail"].get("checks", []) if c["check"] == "log_check"), {})
+        tag = "no_signal" if lc.get("no_signal") else lc.get("outcome", "")
+        verify_results.append(f"{e['detail'].get('result')} (log {tag})")
     res = {
         "scenario": name, "namespace": ns, "expected_findings": expected, "detected": detected,
         "missing": missing, "unexpected": extra, "detection_ok": detection_ok,
@@ -289,9 +346,11 @@ def run_scenario(sdir: Path, opt: EvalOptions, out_dir: Path, log: Callable[[str
         "llm_tokens": rep.llm_tokens, "seconds": round(elapsed, 1),
         "human": human, "answers": spec.get("answers"), "decisions": [r.decision for r in rep.fixes],
         "human_checks": human_checks, "human_ok": human_ok,
-        "pass": detection_ok and fix_ok and healthy_ok and human_ok,
+        "verify_results": verify_results, "verify_checks": verify_checks, "verify_ok": verify_ok,
+        "scripted_ai": bool(spec.get("scripted_ai")),
+        "pass": detection_ok and fix_ok and healthy_ok and human_ok and verify_ok,
     }
-    for c in checks + human_checks:
+    for c in checks + human_checks + verify_checks:
         if not c["ok"]:
             log(f"    check failed: {c['check']}")
     log(f"    detected={detected} expected={expected} fix_ok={fix_ok} healthy={rep.healthy} "
@@ -301,6 +360,11 @@ def run_scenario(sdir: Path, opt: EvalOptions, out_dir: Path, log: Callable[[str
     return res
 
 
+def _vcell(r: Dict[str, Any]) -> str:
+    v = r.get("verify_results") or []
+    return "; ".join(v) if v else "none"
+
+
 def write_scorecard(results: List[Dict[str, Any]], out_dir: Path, meta: Dict[str, Any]) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "scorecard.json").write_text(json.dumps({"meta": meta, "results": results}, indent=1))
@@ -308,19 +372,19 @@ def write_scorecard(results: List[Dict[str, Any]], out_dir: Path, meta: Dict[str
     lines = ["# kubeagt eval scorecard", "",
              f"- date: {meta.get('date')}", f"- context: {meta.get('context')}", f"- LLM mode: {meta.get('llm')}",
              f"- kubeagt version: {meta.get('version')}", "",
-             "| Scenario | Detected (expected) | Detection | Correct fix | Healthy after (expected) | Fixes applied | Steps | Time (s) | Result |",
-             "|---|---|---|---|---|---|---|---|---|"]
+             "| Scenario | Detected (expected) | Detection | Correct fix | Healthy after (expected) | Fixes applied | Verify | Steps | Time (s) | Result |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
     scen = [r for r in results if not r.get("human")]
     hum = [r for r in results if r.get("human")]
     for r in scen:
         if "error" in r:
-            lines.append(f"| {r['scenario']} | error: {r['error'][:80]} | | | | | | | FAIL |")
+            lines.append(f"| {r['scenario']} | error: {r['error'][:80]} | | | | | | | | FAIL |")
             continue
         det = ", ".join(r["detected"]) or "none"
         exp = ", ".join(r["expected_findings"]) or "none"
         lines.append(f"| {r['scenario']} | {det} ({exp}) | {yn(r['detection_ok'])} | {yn(r['fix_ok'])} | "
                      f"{'yes' if r['healthy_after'] else 'no'} ({'yes' if r['expect_healthy'] else 'no'}) | "
-                     f"{r['fixes_applied']} | {r['steps']} | {r['seconds']} | {'PASS' if r['pass'] else 'FAIL'} |")
+                     f"{r['fixes_applied']} | {_vcell(r)} | {r['steps']} | {r['seconds']} | {'PASS' if r['pass'] else 'FAIL'} |")
 
     def summary(rs):
         ok = [r for r in rs if r.get("pass")]
@@ -330,6 +394,12 @@ def write_scorecard(results: List[Dict[str, Any]], out_dir: Path, meta: Dict[str
                 f"health as expected {sum(r['healthy_ok'] for r in good)}/{len(good)}.")
     if scen:
         lines += ["", summary(scen)]
+        vr = [v for r in scen if "error" not in r for v in r.get("verify_results", [])]
+        if vr:
+            lines += ["", f"Verify results over {len(vr)} applied fix(es): "
+                      f"verified {sum(v.startswith('verified (') for v in vr)}, "
+                      f"verified with warnings {sum(v.startswith('verified_with_warnings') for v in vr)} "
+                      f"(no_signal {sum('no_signal' in v for v in vr)}), failed {sum(v.startswith('failed') for v in vr)}."]
     if hum:
         lines += ["", "## Human response cases", "",
                   "Answers are fed to the real fix prompt in order; when they run out the prompt sees end of input (Ctrl-D).", "",
@@ -339,7 +409,7 @@ def write_scorecard(results: List[Dict[str, Any]], out_dir: Path, meta: Dict[str
             if "error" in r:
                 lines.append(f"| {r['scenario']} | | error: {r['error'][:80]} | | | | | FAIL |")
                 continue
-            allc = r["fix_checks"] + r["human_checks"]
+            allc = r["fix_checks"] + r["human_checks"] + r.get("verify_checks", [])
             passed = sum(c["ok"] for c in allc)
             ans = ", ".join(repr(a) if a == "" else str(a) for a in r["answers"]) or "(none, end of input)"
             lines.append(f"| {r['scenario']} | {ans} | {', '.join(r['decisions']) or 'none'} | {r['fixes_applied']} | "
@@ -348,7 +418,8 @@ def write_scorecard(results: List[Dict[str, Any]], out_dir: Path, meta: Dict[str
         lines += ["", f"**Human response cases passed {sum(1 for r in hum if r.get('pass'))}/{len(hum)}.**"]
     lines += ["", f"**Overall passed {sum(1 for r in results if r.get('pass'))}/{len(results)}.**", "",
               "Steps = fix proposals + LLM read-only tool calls. Time covers diagnosis, all fixes, and verification "
-              "(scenario setup and settle time excluded)."]
+              "(scenario setup and settle time excluded). Verify lists each applied fix's result and its log check "
+              "outcome; verified with warnings counts as verified unless the case expects otherwise (expect_verify)."]
     p = out_dir / "scorecard.md"
     p.write_text("\n".join(lines) + "\n")
     return p

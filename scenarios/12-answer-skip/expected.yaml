@@ -7,6 +7,6 @@ expected_findings: [nodeselector-no-match]
 unchanged: [Deployment/worker]
 expect:
   decisions: ["skip"]
-  events: {fix_applied: 0, rule_check: 1, prompt_eof: 0}
+  events: {"fix_apply:ok": 0, rule_check: 1, "prompt:n/a": 0}
   open: [nodeselector-no-match]
 expect_healthy: false

@@ -8,4 +8,6 @@ expected_fixes:
   - target: Deployment/web
     checks:
       - {path: "spec.template.spec.containers[0].image", equals: "busybox:1.36"}
+expect_verify:
+  - {result: verified_with_warnings, log_check: warn, no_signal: true, reason_contains: "no log output"}
 expect_healthy: true

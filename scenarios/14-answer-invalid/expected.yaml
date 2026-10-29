@@ -10,5 +10,5 @@ expected_fixes:
       - {path: spec.template.spec.nodeSelector, absent: true}
 expect:
   decisions: ["yes"]
-  events: {prompt_invalid: 2, fix_applied: 1, fix_verified: 1, prompt_eof: 0}
+  events: {"prompt:warn": 2, "fix_apply:ok": 1, "fix_verify:ok": 1, "prompt:n/a": 0}
 expect_healthy: true

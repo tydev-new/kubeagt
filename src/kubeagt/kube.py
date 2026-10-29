@@ -168,9 +168,11 @@ def _run(argv: List[str], audit: AuditLog, path: str, timeout: int = 60, stdin: 
     except FileNotFoundError as e:
         raise KubectlError(f"kubectl not found: {e}") from e
     except subprocess.TimeoutExpired:
-        audit.write("kubectl", path=path, argv=_display(argv), rc=None, error="timeout", secs=round(time.time() - t0, 2))
+        audit.write("kubectl", actor="ai" if path == "llm-tool" else "kubeagt", outcome="fail", reason="timeout",
+                    path=path, argv=_display(argv), rc=None, error="timeout", secs=round(time.time() - t0, 2))
         raise KubectlError(f"timeout after {timeout}s: {' '.join(_display(argv))}") from None
-    audit.write("kubectl", path=path, argv=_display(argv), rc=cp.returncode, secs=round(time.time() - t0, 2))
+    audit.write("kubectl", actor="ai" if path == "llm-tool" else "kubeagt", outcome="ok" if cp.returncode == 0 else "fail",
+                path=path, argv=_display(argv), rc=cp.returncode, secs=round(time.time() - t0, 2))
     return cp
 
 
@@ -245,6 +247,17 @@ class ReadOnlyKubectl:
         args = validate_read_argv(argv)
         cp = _run(self.t.base() + args + ["-n", self.t.namespace], self.audit, "collect")
         return redact_text(cp.stdout if cp.returncode == 0 else "")
+
+    def fetch_logs(self, pod: str, container: str, previous: bool = False, tail: int = 500) -> tuple:
+        """(ok, text, error). Text is redacted; error is the redacted kubectl message when the fetch failed."""
+        argv = ["logs", pod, "-c", container, "--tail", str(tail)]
+        if previous:
+            argv.append("--previous")
+        args = validate_read_argv(argv)
+        cp = _run(self.t.base() + args + ["-n", self.t.namespace], self.audit, "verify")
+        if cp.returncode != 0:
+            return False, "", redact_text((cp.stderr or cp.stdout or "").strip())[:300]
+        return True, redact_text(cp.stdout or ""), ""
 
     def get_object(self, kind: str, name: str) -> Optional[dict]:
         args = validate_read_argv(["get", f"{kind}/{name}", "-o", "json"])

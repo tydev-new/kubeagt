@@ -148,13 +148,14 @@ class Investigator:
                 resp = self.llm.chat(messages, TOOLS)
             except LLMError as e:
                 res.stopped = f"LLM error: {e}"
-                self.audit.write("llm_error", error=str(e))
+                self.audit.write("llm_call", actor="ai", outcome="fail", reason=redact_text(str(e))[:300],
+                                 step=step, model=getattr(self.llm, "name", "?"), error=redact_text(str(e))[:2000])
                 break
             self.budget.add(resp.usage, self.cfg)
             msg = dict(resp.message or {})
             msg.setdefault("role", "assistant")
             calls = msg.get("tool_calls") or []
-            self.audit.write("llm_call", step=step, model=getattr(self.llm, "name", "?"), secs=round(time.time() - t0, 2),
+            self.audit.write("llm_call", actor="ai", outcome="ok", step=step, model=getattr(self.llm, "name", "?"), secs=round(time.time() - t0, 2),
                              usage=resp.usage, content=redact_text(msg.get("content") or "")[:2000],
                              tool_calls=[{"name": c.get("function", {}).get("name"),
                                           "arguments": redact_text(c.get("function", {}).get("arguments", ""))[:2000]} for c in calls])

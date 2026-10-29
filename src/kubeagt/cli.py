@@ -77,6 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="stop after this many applied fixes (default 10); the session also stops after "
                             "3x this many proposals (at least 10)")
         f.add_argument("--verify-timeout", type=int, default=120, help="seconds to wait for rollout/health after a fix")
+        f.add_argument("--log-watch-seconds", type=float, default=30.0,
+                       help="seconds to watch the target's pod logs after a rollout (log check in verify; default 30)")
         f.add_argument("--min-memory", type=float, default=MIN_MEMORY_MIB)
         f.add_argument("--session-dir", help="where to write audit.jsonl and report.json (default ~/.kubeagt/sessions/<time>)")
 
@@ -89,6 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--out", default="eval-results", help="output directory (default ./eval-results)")
     e.add_argument("--keep", action="store_true", help="keep scenario namespaces after the run")
     e.add_argument("--verify-timeout", type=int, default=120)
+    e.add_argument("--log-watch-seconds", type=float, default=30.0, help="log check watch window per applied fix")
     e.add_argument("--list", action="store_true", help="list scenarios and exit")
     return p
 
@@ -153,7 +156,7 @@ def cmd_fix(a) -> int:
         print("WARNING: --yes approves every fix without asking. Use it only for CI and evals.", file=sys.stderr)
     t = _target(a)
     sess_dir = Path(a.session_dir) if a.session_dir else default_session_dir()
-    audit = AuditLog(sess_dir / "audit.jsonl")
+    audit = AuditLog(sess_dir / "audit.jsonl", namespace=a.namespace)
     kc = ReadOnlyKubectl(t, audit)
     writer = KubeWriter(t, audit)
     if not kc.namespace_exists():
@@ -179,6 +182,7 @@ def cmd_fix(a) -> int:
     sess = FixSession(a.namespace, kc.current_context(), lambda: collect(kc), writer, kc, audit, llm=llm, llm_cfg=cfg,
                       budget=Budget(max_steps=a.max_steps, max_tokens=a.max_tokens, max_cost_usd=a.max_cost),
                       yes=a.yes, max_fixes=a.max_fixes, verify_timeout=a.verify_timeout, min_memory_mib=a.min_memory,
+                      log_watch_seconds=a.log_watch_seconds,
                       health_snapshot=lambda: collect(kc, kinds=HEALTH_KINDS, with_logs=False, with_secrets=False))
     rep = sess.run()
     (sess_dir / "report.json").write_text(json.dumps(rep.to_dict(), indent=1, default=str))
@@ -208,7 +212,7 @@ def cmd_eval(a) -> int:
         print(f"LLM setup failed: {e}", file=sys.stderr)
         return 2
     opt = EvalOptions(os.path.expanduser(a.kubeconfig) if a.kubeconfig else None, a.context, a.llm, cfg, a.keep,
-                      a.verify_timeout, a.max_steps, a.relay_dir, a.relay_timeout)
+                      a.verify_timeout, a.max_steps, a.relay_dir, a.relay_timeout, log_watch_seconds=a.log_watch_seconds)
     llm_desc = (a.llm if a.llm == "none" else f"{a.llm} (offline, no LLM API calls)" if a.llm == "mock"
                 else RELAY_NAME if a.llm == "relay"
                 else f"{a.llm} ({cfg.provider}, {cfg.model})") if a.llm != "auto" else ("auto (" + ("key set" if cfg.api_key() else "no key, rules only") + ")")

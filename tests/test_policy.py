@@ -25,12 +25,12 @@ def test_hook_called_once_per_proposal_before_dry_run_and_is_a_no_op(tmp_path):
     fc, rep, ev = _session(tmp_path, ["y", "y"])
     names = [e["event"] for e in ev]
     pol = [e for e in ev if e["event"] == "policy_check"]
-    assert len(pol) == len(rep.fixes) == 2 and all(e["allow"] and e["checks_run"] == [] for e in pol)
+    assert len(pol) == len(rep.fixes) == 2 and all(e["detail"]["allow"] and e["detail"]["checks_run"] == [] and e["outcome"] == "ok" for e in pol)
     # each policy_check comes before the human is asked about that proposal
     for e in pol:
-        d = next(x for x in ev if x["event"] == "decision" and x["n"] == e["n"])
+        d = next(x for x in ev if x["event"] == "decision" and x["fix_n"] == e["fix_n"])
         assert ev.index(e) < ev.index(d)
-    assert "fix_blocked" not in names and len(fc.applied) == 2 and rep.healthy
+    assert not [e for e in pol if e["outcome"] == "block"] and "fix_blocked" not in names and len(fc.applied) == 2 and rep.healthy
 
 
 def test_hook_receives_proposal_and_live_object(tmp_path):

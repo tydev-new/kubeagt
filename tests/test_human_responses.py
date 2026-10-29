@@ -44,8 +44,8 @@ def assert_invariants(rep, ev, spec=None, mode="none"):
 def test_yes_applies_and_verifies(tmp_path, llm):
     fc = selector_only()
     rep, ev, _ = run(fc, ["y"], tmp_path, llm)
-    assert [d["decision"] for d in kinds(ev, "decision")] == ["yes"]
-    assert len(fc.applied) == 1 and len(kinds(ev, "fix_verified")) == 1 and rep.healthy
+    assert [d["detail"]["answer"] for d in kinds(ev, "decision")] == ["yes"]
+    assert len(fc.applied) == 1 and len([e for e in kinds(ev, "fix_verify") if e["outcome"] == "ok"]) == 1 and rep.healthy
     assert_invariants(rep, ev)
 
 
@@ -53,7 +53,7 @@ def test_yes_applies_and_verifies(tmp_path, llm):
 def test_no_is_never_reoffered_and_no_rule_rerun(tmp_path, llm):
     fc = selector_only()
     rep, ev, _ = run(fc, ["n", "y"], tmp_path, llm)    # the spare y would apply it if it were re-offered
-    assert [d["decision"] for d in kinds(ev, "decision")] == ["no"]
+    assert [d["detail"]["answer"] for d in kinds(ev, "decision")] == ["no"]
     assert fc.applied == [] and len(kinds(ev, "rule_check")) == 1
     assert rep.stopped.startswith("no fix available")
     assert_invariants(rep, ev)
@@ -63,19 +63,19 @@ def test_no_is_never_reoffered_and_no_rule_rerun(tmp_path, llm):
 def test_skip_sets_finding_aside(tmp_path, llm):
     fc = combined()
     rep, ev, _ = run(fc, ["s", "y", "y"], tmp_path, llm)
-    assert [d["decision"] for d in kinds(ev, "decision")] == ["skip", "yes", "yes"]
+    assert [d["detail"]["answer"] for d in kinds(ev, "decision")] == ["skip", "yes", "yes"]
     end = kinds(ev, "session_end")[0]
-    assert end["skipped"] == ["nodeselector-no-match:Deployment/redis:"]
-    assert "nodeselector-no-match:Deployment/redis:" in end["open_findings"] and not rep.healthy
+    assert end["detail"]["skipped"] == ["nodeselector-no-match:Deployment/redis:"]
+    assert "nodeselector-no-match:Deployment/redis:" in end["detail"]["open_findings"] and not rep.healthy
     for t in kinds(ev, "llm_task")[1:]:
-        assert not any(k.startswith("nodeselector-no-match:") for k in t["findings"])
+        assert not any(k.startswith("nodeselector-no-match:") for k in t["detail"]["findings"])
     assert_invariants(rep, ev)
 
 
 def test_quit_stops_and_writes_nothing_after(tmp_path):
     fc = combined()
     rep, ev, _ = run(fc, ["y", "q", "y"], tmp_path)
-    assert [d["decision"] for d in kinds(ev, "decision")] == ["yes", "quit"]
+    assert [d["detail"]["answer"] for d in kinds(ev, "decision")] == ["yes", "quit"]
     assert len(fc.applied) == 1 and rep.stopped == "user quit"
     assert_invariants(rep, ev)
 
@@ -83,22 +83,22 @@ def test_quit_stops_and_writes_nothing_after(tmp_path):
 def test_invalid_input_reprompts_then_valid(tmp_path):
     fc = selector_only()
     rep, ev, out = run(fc, ["maybe", "", "Y"], tmp_path)
-    assert len(kinds(ev, "prompt_invalid")) == 2 and out.count("  please answer y, n, s, or q") == 2
-    assert [d["decision"] for d in kinds(ev, "decision")] == ["yes"] and len(fc.applied) == 1
+    assert len([e for e in kinds(ev, "prompt") if e["outcome"] == "warn"]) == 2 and out.count("  please answer y, n, s, or q") == 2
+    assert [d["detail"]["answer"] for d in kinds(ev, "decision")] == ["yes"] and len(fc.applied) == 1
 
 
 def test_too_many_invalid_answers_quits(tmp_path):
     fc = selector_only()
     rep, ev, _ = run(fc, ["?"] * 20, tmp_path)
-    assert fc.applied == [] and rep.stopped == "user quit" and len(kinds(ev, "prompt_invalid")) == 6
+    assert fc.applied == [] and rep.stopped == "user quit" and len([e for e in kinds(ev, "prompt") if e["outcome"] == "warn"]) == 6
 
 
 def test_eof_is_quit_and_applies_nothing(tmp_path):
     fc = combined()
     rep, ev, _ = run(fc, [], tmp_path)
-    assert len(kinds(ev, "prompt_eof")) == 1 and [d["decision"] for d in kinds(ev, "decision")] == ["quit"]
+    assert [e["detail"].get("eof") for e in kinds(ev, "prompt")] == [True] and [d["detail"]["answer"] for d in kinds(ev, "decision")] == ["quit"]
     assert fc.applied == [] and rep.stopped == "user quit"
-    assert not [e for e in ev if e["event"] == "kubectl" and e.get("path") == "write"]
+    assert not [e for e in ev if e["event"] == "kubectl" and e["detail"].get("path") == "write"]
 
 
 def test_tty_ask_eof_from_closed_stdin(tmp_path, monkeypatch):
@@ -115,16 +115,19 @@ def test_tty_ask_eof_from_closed_stdin(tmp_path, monkeypatch):
 def test_mixed_sequence_on_redis(tmp_path, llm):
     fc = combined()
     rep, ev, _ = run(fc, ["n", "y", "s", "y"], tmp_path, llm)
-    assert [d["decision"] for d in kinds(ev, "decision")] == ["no", "yes", "skip"]
+    assert [d["detail"]["answer"] for d in kinds(ev, "decision")] == ["no", "yes", "skip"]
     assert [a[3][0]["path"] for a in fc.applied] == ["/spec/template/spec/containers/0/resources/requests/memory"]
-    spec = {"expect": {"decisions": ["no", "yes", "skip"], "events": {"fix_applied": 1},
+    spec = {"expect": {"decisions": ["no", "yes", "skip"], "events": {"fix_apply:ok": 1},
                        "open": ["nodeselector-no-match", "probe-port-mismatch"], "stopped": "no fix available"}}
     assert_invariants(rep, ev, spec)
 
 
 def test_checker_catches_a_rule_rerun_after_no():
-    ev = [{"event": "rule_check"}, {"event": "decision", "decision": "no", "n": 1, "rule": "r", "target": "Deployment/x",
-                                    "patch_type": "json", "patch": []}, {"event": "rule_check"}, {"event": "session_end"}]
+    from kubeagt.audit import upgrade_v0
+    # written in the version 0 format on purpose: the checker reads old audit files through upgrade_v0
+    ev = [upgrade_v0(e) for e in [{"event": "rule_check"}, {"event": "decision", "decision": "no", "n": 1, "rule": "r",
+                                   "target": "Deployment/x", "patch_type": "json", "patch": []},
+                                  {"event": "rule_check"}, {"event": "session_end"}]]
 
     class R:
         stopped, remaining_findings = "", []

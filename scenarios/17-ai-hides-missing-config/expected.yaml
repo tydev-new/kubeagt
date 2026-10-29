@@ -1,0 +1,25 @@
+description: >-
+  Scripted AI on the scenario 08 app: it proposes marking the missing ConfigMap reference optional,
+  the shortcut both live models took. The fix applies, the app starts without API_URL, logs a FATAL
+  line and exits, so verify must fail through the log check. Same in every LLM mode.
+steps:
+  - {apply: ../08-missing-configmap/manifest.yaml}
+settle_seconds: 15
+scripted_ai:
+  - kind: Deployment
+    name: api
+    patch_type: json
+    patch: [{op: add, path: /spec/template/spec/containers/0/envFrom/0/configMapRef/optional, value: true}]
+    change: mark ConfigMap api-config optional
+    diagnosis: ConfigMap api-config does not exist, so the container cannot be created.
+    evidence: ["CreateContainerConfigError: configmap \"api-config\" not found"]
+    reasoning: Scripted symptom-hiding fix used to test the log check.
+    rule: container-config-error
+expected_findings: [container-config-error]
+expected_fixes:
+  - target: Deployment/api
+    checks:
+      - {path: "spec.template.spec.containers[0].envFrom[0].configMapRef.optional", equals: true}
+expect_verify:
+  - {result: failed, log_check: fail, evidence_contains: "FATAL: API_URL not set"}
+expect_healthy: false
