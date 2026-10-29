@@ -73,7 +73,9 @@ def build_parser() -> argparse.ArgumentParser:
         _common(f)
         _llm_args(f)
         f.add_argument("--yes", action="store_true", help="approve every fix without asking. For CI and evals only.")
-        f.add_argument("--max-fixes", type=int, default=10)
+        f.add_argument("--max-fixes", type=int, default=10,
+                       help="stop after this many applied fixes (default 10); the session also stops after "
+                            "3x this many proposals (at least 10)")
         f.add_argument("--verify-timeout", type=int, default=120, help="seconds to wait for rollout/health after a fix")
         f.add_argument("--min-memory", type=float, default=MIN_MEMORY_MIB)
         f.add_argument("--session-dir", help="where to write audit.jsonl and report.json (default ~/.kubeagt/sessions/<time>)")

@@ -1,6 +1,10 @@
 """The approval-gated fix loop.
 
-collect, check, propose ONE fix, ask the human, apply through KubeWriter, verify, repeat.
+Follows the flow chart in docs/design.html: collect and check, ask the AI or take the next rule fix,
+server dry run, ask the human, apply through KubeWriter, verify. Every outcome is recorded in the
+session history (fed to the AI) and the audit log. After a rejected dry run, n, skip, or a repeated
+patch nothing changed, so the loop goes straight back to "Any errors left?"; after an apply attempt
+(ok or failed) it re-collects and re-runs the rules once.
 """
 from __future__ import annotations
 
@@ -80,20 +84,25 @@ class FixSession:
                  ask: Callable[[str], str] = tty_ask, yes: bool = False, out: Callable[[str], None] = print,
                  max_fixes: int = 10, verify_timeout: float = 120, settle_timeout: float = 15,
                  min_memory_mib: float = MIN_MEMORY_MIB, dry_run_validate: bool = True,
-                 health_snapshot: Optional[Callable[[], Bundle]] = None, sleep: Callable[[float], None] = time.sleep):
+                 health_snapshot: Optional[Callable[[], Bundle]] = None, sleep: Callable[[float], None] = time.sleep,
+                 max_proposals: Optional[int] = None):
         self.ns, self.context = namespace, context
         self.snapshot, self.writer, self.kc = snapshot, writer, kubectl
         self.health_snapshot = health_snapshot or snapshot
         self.audit, self.llm, self.llm_cfg = audit, llm, llm_cfg
         self.budget = budget or Budget()
         self.ask, self.yes, self.out = ask, yes, out
+        # max_fixes caps applied fixes (apply attempts). max_proposals is a separate guard so a model that keeps
+        # proposing new patches that are rejected, declined, or repeated cannot loop forever.
         self.max_fixes, self.verify_timeout, self.settle_timeout = max_fixes, verify_timeout, settle_timeout
+        self.max_proposals = max_proposals if max_proposals is not None else max(3 * max_fixes, 10)
         self.min_memory_mib = min_memory_mib
         self.dry_run_validate = dry_run_validate
         self.sleep = sleep
         self.handled: Set[str] = set()      # fix fingerprints already decided or attempted
         self.skipped: Set[str] = set()      # finding keys the user skipped
-        self.history: List[str] = []        # fed back to the LLM
+        self.history: List[str] = []        # session history, fed back to the LLM
+        self.dry_run_cache: dict = {}       # fix fingerprint -> CompletedProcess of its one server dry run
         self.llm_idle_state: Optional[frozenset] = None
 
     # ------------------------------------------------------------ helpers
@@ -101,17 +110,24 @@ class FixSession:
         b = self.snapshot()
         return b, run_rules(b, self.min_memory_mib)
 
+    def _dry_run(self, fix: Fix):
+        """One server-side dry run per proposal; later callers reuse the result."""
+        fp = fix.fingerprint()
+        if fp not in self.dry_run_cache:
+            self.dry_run_cache[fp] = self.writer.patch(fix.kind, fix.name, fix.patch_type, fix.patch, dry_run=True)
+        return self.dry_run_cache[fp]
+
     def _validate(self, fix: Fix) -> Optional[str]:
         if not self.dry_run_validate:
             return None
-        cp = self.writer.patch(fix.kind, fix.name, fix.patch_type, fix.patch, dry_run=True)
+        cp = self._dry_run(fix)
         return None if cp.returncode == 0 else redact_text((cp.stderr or cp.stdout or "").strip())[:400]
 
     def _after(self, bundle: Bundle, fix: Fix):
         before = bundle.get(KIND_FILE.get(fix.kind, fix.kind.lower() + "s"), fix.name)
         after, err = None, None
         if self.dry_run_validate:
-            cp = self.writer.patch(fix.kind, fix.name, fix.patch_type, fix.patch, dry_run=True)
+            cp = self._dry_run(fix)
             if cp.returncode != 0:
                 return before, None, redact_text((cp.stderr or cp.stdout).strip())[:400]
             try:
@@ -124,6 +140,10 @@ class FixSession:
             except (PatchError, KeyError, IndexError, ValueError) as e:
                 err = f"patch does not apply: {e}"
         return before, after, err
+
+    def _open(self, findings: List[Finding]) -> List[Finding]:
+        """Findings minus the ones the user skipped (and symptoms of skipped ones)."""
+        return [f for f in findings if f.key() not in self.skipped and (f.symptom_of or "") not in self.skipped]
 
     def _llm_task(self, findings: List[Finding], candidates: List[Finding]) -> str:
         fdesc = [{"rule": f.rule, "target": f.target, "container": f.container, "root_cause": f.root_cause,
@@ -142,22 +162,47 @@ class FixSession:
     def run(self) -> SessionReport:
         t0 = time.time()
         rep = SessionReport(self.ns, self.context)
-        bundle, findings = self._check()
+        bundle, findings = self._check()                       # Collect snapshot and run rule checks
         rep.initial_findings = [f.to_dict() for f in findings]
         self._print_findings(findings)
-        n = 0
-        while n < self.max_fixes:
-            roots = [f for f in findings if f.root_cause]
-            cands = [f for f in roots if f.fix and f.fix.fingerprint() not in self.handled and f.key() not in self.skipped]
+        n = 0          # proposals (numbering and the proposal guard)
+        applies = 0    # apply attempts, capped by --max-fixes
+        while True:
+            # Any errors left? Root causes the user has not skipped. Caps also stop the session here.
+            roots = [f for f in self._open(findings) if f.root_cause]
+            if not roots:
+                break
+            if applies >= self.max_fixes:
+                rep.stopped = f"fix cap reached ({self.max_fixes} applied)"
+                break
+            if n >= self.max_proposals:
+                rep.stopped = f"proposal cap reached ({self.max_proposals} proposals)"
+                break
+            cands = [f for f in roots if f.fix and f.fix.fingerprint() not in self.handled]
             proposal: Optional[Proposal] = None
             finding: Optional[Finding] = None
-            state = frozenset(f.key() for f in roots if f.key() not in self.skipped)
-            if self.llm is not None and state and state != self.llm_idle_state:
+            state = frozenset(f.key() for f in roots)
+            # Ask the AI? yes when configured and the open errors changed since it last had nothing new.
+            if self.llm is not None and state != self.llm_idle_state:
                 self.out(f"\nInvestigating with LLM ({getattr(self.llm, 'name', 'llm')}), read-only tools only...")
-                inv = Investigator(self.llm, self.kc, self.audit, self.budget, self.llm_cfg, validate=self._validate, log=self.out)
-                res = inv.investigate(self._llm_task(findings, cands))
+                inv = Investigator(self.llm, self.kc, self.audit, self.budget, self.llm_cfg, log=self.out)
+                res = inv.investigate(self._llm_task(self._open(findings), cands))
                 rep.tool_steps += res.tool_steps
-                if res.proposal and res.proposal.fix.fingerprint() not in self.handled:
+                if res.proposal and res.proposal.fix.fingerprint() in self.handled:
+                    # The AI repeated a patch already tried: record it, then back to Any errors left.
+                    n += 1
+                    fix = res.proposal.fix
+                    rec = FixRecord(n, fix.source, res.proposal.rule, f"{fix.kind}/{fix.name}", fix.summary,
+                                    fix.patch_type, fix.patch, decision="repeat",
+                                    status="rejected: repeats a patch already tried in this session")
+                    self.out(f"\nThe LLM repeated a fix already tried on {rec.target}; recorded and not shown again.")
+                    self.history.append(f"fix '{fix.summary}' on {rec.target} was rejected because it repeats a patch "
+                                        "already tried; propose something different or finish")
+                    self.audit.write("fix_repeat", **_rec_dict(rec))
+                    rep.fixes.append(rec)
+                    self.llm_idle_state = state
+                    continue
+                if res.proposal:
                     proposal = res.proposal
                     finding = self._match(roots, proposal)
                 else:
@@ -166,15 +211,16 @@ class FixSession:
                         self.out(_w("LLM: " + res.summary, "     "))
                     if res.stopped and res.stopped != "finished":
                         self.out(f"LLM investigation stopped: {res.stopped}")
-            if proposal is None and cands:
+            if proposal is None and cands:                     # next rule fix
                 finding = cands[0]
                 proposal = Proposal(finding.fix, finding.diagnosis, finding.evidence, finding.reasoning, finding.rule)
             if proposal is None:
+                rep.stopped = rep.stopped or "no fix available for the remaining errors"
                 break
             n += 1
             fix = proposal.fix
             self.handled.add(fix.fingerprint())
-            before, after, err = self._after(bundle, fix)
+            before, after, err = self._after(bundle, fix)      # Server dry run (once per proposal)
             rec = FixRecord(n, fix.source, proposal.rule or (finding.rule if finding else None), f"{fix.kind}/{fix.name}",
                             fix.summary, fix.patch_type, fix.patch, decision="")
             if err:
@@ -183,7 +229,7 @@ class FixSession:
                 self.history.append(f"fix '{fix.summary}' on {rec.target} was rejected by server dry run: {err}")
                 self.audit.write("fix_invalid", **_rec_dict(rec))
                 rep.fixes.append(rec)
-                continue
+                continue                                       # no rule re-run
             self._print_proposal(n, proposal, finding, before, after, len(cands))
             decision = "yes" if self.yes else ANSWERS.get(
                 str(self.ask("Apply this fix? [y]es / [n]o / [s]kip / [q]uit: ")).strip().lower(), "quit")
@@ -200,16 +246,14 @@ class FixSession:
                     self.skipped.add(finding.key())
                 self.history.append(f"user skipped the issue on {rec.target} ({rec.rule}); leave it alone")
                 rep.fixes.append(rec)
-                continue
+                continue                                       # no rule re-run
             if decision == "no":
                 self.history.append(f"user rejected fix '{fix.summary}' on {rec.target}; propose an alternative only if clearly better")
                 rep.fixes.append(rec)
-                continue
-            self._apply_and_verify(rec, fix, finding, cands)
+                continue                                       # no rule re-run
+            applies += 1
+            bundle, findings = self._apply_and_verify(rec, fix, finding, cands)   # one re-collect per apply
             rep.fixes.append(rec)
-            bundle, findings = self._check()
-        else:
-            rep.stopped = f"fix cap reached ({self.max_fixes})"
 
         applied = any(r.applied for r in rep.fixes)
         if applied:
@@ -241,14 +285,15 @@ class FixSession:
                 return f
         return None
 
-    def _apply_and_verify(self, rec: FixRecord, fix: Fix, finding: Optional[Finding], cands: List[Finding]) -> None:
+    def _apply_and_verify(self, rec: FixRecord, fix: Fix, finding: Optional[Finding], cands: List[Finding]) -> tuple:
+        """Apply, verify, record. Returns the one fresh (bundle, findings) taken after the apply attempt."""
         cp = self.writer.patch(fix.kind, fix.name, fix.patch_type, fix.patch)
         if cp.returncode != 0:
             rec.status = "apply failed: " + redact_text((cp.stderr or cp.stdout).strip())[:300]
             self.out(f"  {rec.status}")
-            self.history.append(f"applying '{fix.summary}' failed: {rec.status}")
+            self.history.append(f"applying '{fix.summary}' on {rec.target} failed: {rec.status}")
             self.audit.write("fix_apply_failed", **_rec_dict(rec))
-            return
+            return self._check()
         rec.applied = True
         self.out(f"  applied: {(cp.stdout or '').strip()}")
         self.audit.write("fix_applied", **_rec_dict(rec))
@@ -259,17 +304,18 @@ class FixSession:
         b, nf = self._check()
         still = bool(finding) and any(f.key() == finding.key() for f in nf)
         target_issues = [f for f in nf if f.target == rec.target and f.root_cause]
+        # Verified only when the rollout completed AND the finding this fix addressed is gone.
         if still:
-            rec.status = f"not resolved: rule {finding.rule} still fires on {rec.target}"
+            rec.status = f"verify failed: rule {finding.rule} still fires on {rec.target}"
         elif rs.returncode == 0:
             rec.verified = True
             rec.status = "verified: rollout complete" + ("" if not target_issues else f"; {len(target_issues)} other issue(s) remain")
-        elif pending_same or target_issues:
-            rec.verified = True
-            rec.status = ("spec issue resolved; rollout is still blocked by other issue(s): "
-                          + ", ".join(sorted({f.rule for f in target_issues}) or {"pending"}))
         else:
-            rec.status = "applied, but rollout did not complete: " + redact_text((rs.stderr or rs.stdout or "").strip())[:200]
+            rec.status = "verify failed: rollout did not complete"
+            if target_issues:
+                rec.status += "; blocked by other issue(s): " + ", ".join(sorted({f.rule for f in target_issues}))
+            else:
+                rec.status += ": " + redact_text((rs.stderr or rs.stdout or "").strip())[:200]
         self.out(f"  {rec.status}")
         if not rec.verified:
             new_state = "; ".join(f"{f.rule} on {f.target}: {f.title}" for f in nf if f.root_cause) or "no rule findings"
@@ -277,6 +323,7 @@ class FixSession:
         else:
             self.history.append(f"applied and verified '{fix.summary}' on {rec.target}")
         self.audit.write("fix_verified" if rec.verified else "fix_verify_failed", **_rec_dict(rec))
+        return b, nf
 
     # ------------------------------------------------------------ output
     def _print_findings(self, findings: List[Finding]) -> None:

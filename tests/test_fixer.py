@@ -23,12 +23,13 @@ def combined():
                        [service()], [node()])
 
 
-def session(fc, answers=None, yes=False, llm=None, audit=None, out=None):
+def session(fc, answers=None, yes=False, llm=None, audit=None, out=None, **kw):
     answers = list(answers or [])
     lines = out if out is not None else []
-    return FixSession("demo", "kind-test", fc.snapshot, fc, KC(), audit or AuditLog(None), llm=llm,
+    kw.setdefault("snapshot", fc.snapshot)
+    return FixSession("demo", "kind-test", kw.pop("snapshot"), fc, KC(), audit or AuditLog(None), llm=llm,
                       ask=lambda prompt: answers.pop(0), yes=yes, out=lines.append, verify_timeout=1,
-                      sleep=lambda s: None)
+                      sleep=lambda s: None, **kw)
 
 
 def test_combined_redis_fixed_one_at_a_time():
@@ -138,4 +139,118 @@ def test_invalid_patch_is_not_shown_or_applied():
         {"role": "assistant", "content": None, "tool_calls": [tool_call("finish", {"summary": "ok"}, "2")]},
     ])
     rep = session(fc, answers=["y"], llm=llm).run()
-    assert fc.dry_runs >= 1 and len(fc.applied) == 1 and rep.fixes[0].source == "rule"
+    # the rejected dry run is recorded, never shown or applied; then the rule fix is offered and applied
+    assert [(r.source, r.decision) for r in rep.fixes] == [("llm", "invalid"), ("rule", "yes")]
+    assert len(fc.applied) == 1 and fc.applied[0][3][0]["path"].endswith("tcpSocket/port")
+    second_task = [m for m in llm.calls[1] if m["role"] == "user"][0]["content"]
+    assert "rejected by server dry run" in second_task
+
+
+# ---------------------------------------------------------------- flow chart conformance
+
+
+def test_max_fixes_counts_applied_fixes_not_proposals():
+    fc = combined()
+    rep = session(fc, answers=["n", "y"], max_fixes=1).run()
+    assert [r.decision for r in rep.fixes] == ["no", "yes"]  # a declined proposal does not use up the cap
+    assert len(fc.applied) == 1 and rep.stopped == "fix cap reached (1 applied)"
+
+
+def test_proposal_guard_stops_endless_rejected_proposals():
+    fc = FakeCluster([redis_deployment(probe_port=5432)], [service()], [node()])
+
+    def bad(i):
+        return {"role": "assistant", "content": None, "tool_calls": [tool_call("propose_fix", {
+            "kind": "Deployment", "name": "redis", "patch_type": "json",
+            "patch": [{"op": "remove", "path": f"/spec/template/spec/nope{i}"}], "diagnosis": "x", "reasoning": "y"}, str(i))]}
+    llm = ScriptedLLM([bad(i) for i in range(50)])
+    rep = session(fc, answers=[], llm=llm, max_proposals=4).run()
+    assert fc.applied == [] and len(rep.fixes) == 4
+    assert all(r.decision == "invalid" for r in rep.fixes) and rep.stopped == "proposal cap reached (4 proposals)"
+
+
+def test_one_snapshot_per_apply():
+    fc = combined()
+    calls = []
+
+    def snap():
+        calls.append(1)
+        return fc.snapshot()
+    rep = session(fc, yes=True, snapshot=snap, health_snapshot=fc.snapshot).run()
+    assert len(fc.applied) == 3 and rep.healthy
+    assert len(calls) == 1 + 3 + 1  # initial, one per apply, one final check
+
+
+def test_no_rule_rerun_after_decline():
+    fc = combined()
+    calls = []
+
+    def snap():
+        calls.append(1)
+        return fc.snapshot()
+    rep = session(fc, answers=["n", "n", "n"], snapshot=snap).run()
+    assert fc.applied == [] and len(rep.fixes) == 3
+    assert len(calls) == 1  # nothing changed in the cluster, so the rules never re-ran
+
+
+class RecordingMock(HintFollowingMock):
+    def __init__(self):
+        self.tasks = []
+
+    def chat(self, messages, tools):
+        if sum(1 for m in messages if m.get("role") == "tool") == 0:
+            self.tasks.append(next(m["content"] for m in messages if m["role"] == "user"))
+        return super().chat(messages, tools)
+
+
+def _findings_part(task):
+    return task.split("Deterministic findings (JSON):", 1)[1].split("</candidate_fixes>", 1)[0]
+
+
+def test_skipped_findings_not_sent_to_llm_again():
+    fc = combined()
+    llm = RecordingMock()
+    rep = session(fc, answers=["s", "y", "y"], llm=llm).run()
+    skipped_rule = rep.fixes[0].rule
+    assert rep.fixes[0].decision == "skip" and skipped_rule in _findings_part(llm.tasks[0])
+    assert len(llm.tasks) >= 2
+    for t in llm.tasks[1:]:
+        assert skipped_rule not in _findings_part(t)
+
+
+def test_repeated_ai_patch_is_recorded_and_loop_continues(tmp_path):
+    fc = FakeCluster([redis_deployment(probe_port=5432)], [service()], [node()])
+    named = {"kind": "Deployment", "name": "redis", "patch_type": "json",
+             "patch": [{"op": "replace", "path": "/spec/template/spec/containers/0/readinessProbe/tcpSocket/port", "value": "redis"}],
+             "diagnosis": "use the named port", "reasoning": "r", "rule": "probe-port-mismatch"}
+    llm = ScriptedLLM([
+        {"role": "assistant", "content": None, "tool_calls": [tool_call("propose_fix", named, "1")]},
+        {"role": "assistant", "content": None, "tool_calls": [tool_call("propose_fix", named, "2")]},
+    ])
+    audit = AuditLog(tmp_path / "audit.jsonl")
+    sess = session(fc, answers=["n", "y"], llm=llm, audit=audit)
+    rep = sess.run()
+    assert [r.decision for r in rep.fixes] == ["no", "repeat", "yes"]
+    assert rep.fixes[1].status.startswith("rejected: repeats") and rep.fixes[2].source == "rule"
+    assert rep.healthy and len(fc.applied) == 1
+    events = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    assert any(e["event"] == "fix_repeat" for e in events)
+    assert any("repeats a patch already tried" in h for h in sess.history)  # in session history for the AI
+    assert len(llm.calls) == 2  # after the repeat the AI is not re-asked until the open errors change
+
+
+def test_verified_only_when_rollout_completes():
+    fc = combined()
+    rep = session(fc, yes=True).run()
+    # nodeSelector fix: the finding cleared, but the rollout is still blocked by the 5Mi memory limit
+    assert rep.fixes[0].applied and not rep.fixes[0].verified
+    assert rep.fixes[0].status.startswith("verify failed: rollout did not complete")
+    assert rep.fixes[-1].verified and rep.fixes[-1].status.startswith("verified: rollout complete")
+    assert rep.healthy
+
+
+def test_one_dry_run_per_ai_proposal():
+    fc = combined()
+    rep = session(fc, yes=True, llm=HintFollowingMock()).run()
+    assert len(fc.applied) == 3 and rep.healthy
+    assert fc.dry_runs == 3
