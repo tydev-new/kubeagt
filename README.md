@@ -198,6 +198,12 @@ kubeagt fix -n shop --llm relay --relay-dir /tmp/kubeagt-relay
 7. **Evals are fenced.** `kubeagt eval` refuses to run unless you pass `--context` or `--kubeconfig`
    explicitly, and only creates or deletes namespaces named `kubeagt-eval-*`.
 
+### Policy filter (planned)
+
+A filter for anti-pattern fixes (removing probes, privileged pods, scaling to 0, swapping the image,
+and so on) is planned. Only the hook exists today and it allows everything; see
+[docs/policy-plan.md](docs/policy-plan.md).
+
 ## Evals
 
 Scenarios live in [`scenarios/`](scenarios/). Each has a `manifest.yaml` and an `expected.yaml` with the

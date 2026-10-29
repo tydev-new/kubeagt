@@ -19,6 +19,7 @@ from .audit import NULL_AUDIT, AuditLog
 from .bundle import Bundle, KIND_FILE
 from .findings import Finding, Fix
 from .health import health, wait_healthy
+from . import policy
 from .patching import PatchError, apply_patch, spec_diff
 from .redact import redact_obj, redact_text
 from .rules import MIN_MEMORY_MIB, run_rules
@@ -95,7 +96,7 @@ class FixSession:
                  max_fixes: int = 10, verify_timeout: float = 120, settle_timeout: float = 15,
                  min_memory_mib: float = MIN_MEMORY_MIB, dry_run_validate: bool = True,
                  health_snapshot: Optional[Callable[[], Bundle]] = None, sleep: Callable[[float], None] = time.sleep,
-                 max_proposals: Optional[int] = None):
+                 max_proposals: Optional[int] = None, policy_checks: Optional[list] = None):
         self.ns, self.context = namespace, context
         self.snapshot, self.writer, self.kc = snapshot, writer, kubectl
         self.health_snapshot = health_snapshot or snapshot
@@ -109,6 +110,7 @@ class FixSession:
         self.min_memory_mib = min_memory_mib
         self.dry_run_validate = dry_run_validate
         self.sleep = sleep
+        self.policy_checks = policy_checks          # None means the default registry (empty for now)
         self.handled: Set[str] = set()      # fix fingerprints already decided or attempted
         self.skipped: Set[str] = set()      # finding keys the user skipped
         self.history: List[str] = []        # session history, fed back to the LLM
@@ -251,9 +253,21 @@ class FixSession:
             n += 1
             fix = proposal.fix
             self.handled.add(fix.fingerprint())
-            before, after, err = self._after(bundle, fix)      # Server dry run (once per proposal)
             rec = FixRecord(n, fix.source, proposal.rule or (finding.rule if finding else None), f"{fix.kind}/{fix.name}",
                             fix.summary, fix.patch_type, fix.patch, decision="")
+            # Policy filter (skeleton): runs before the dry run and the human. The registry is empty, so it always allows.
+            live = bundle.get(KIND_FILE.get(fix.kind, fix.kind.lower() + "s"), fix.name)
+            pol = policy.evaluate(proposal, live, policy.PolicyContext(self.ns, self.context, list(self.history)),
+                                  self.policy_checks)
+            self.audit.write("policy_check", n=n, target=rec.target, **pol)
+            if not pol["allow"]:
+                rec.decision, rec.status = "blocked", f"blocked by policy: {pol['reason']}"
+                self.out(f"\nNot showing a proposed fix for {rec.target}: {rec.status}")
+                self.history.append(f"fix '{fix.summary}' on {rec.target} was blocked by policy: {pol['reason']}")
+                self.audit.write("fix_blocked", **_rec_dict(rec))
+                rep.fixes.append(rec)
+                continue                                       # no rule re-run
+            before, after, err = self._after(bundle, fix)      # Server dry run (once per proposal)
             if err:
                 rec.decision, rec.status = "invalid", f"patch rejected by dry run: {err}"
                 self.out(f"\nSkipping a proposed fix for {rec.target}: {rec.status}")
