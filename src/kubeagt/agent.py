@@ -63,8 +63,21 @@ TOOLS = [
 
 
 @dataclass
+class ToolLimits:
+    """Inner tool-error loop limits for one investigation. Configurable in code (Investigator(limits=...))."""
+    max_calls_per_turn: int = 5    # tool calls beyond this in one assistant turn are not executed
+    nudge_after_errors: int = 3    # consecutive failed kubectl results before kubeagt tells the AI to change approach
+    stop_after_errors: int = 5     # consecutive failed kubectl results before the investigation stops
+
+
+def tool_failed(out: str) -> bool:
+    """A kubectl tool result counts as an error when it was refused, raised, or kubectl exited non-zero."""
+    return out.startswith(("REFUSED", "ERROR", "[exit "))
+
+
+@dataclass
 class Budget:
-    max_steps: int = 12
+    max_steps: int = 12            # assistant turns plus executed kubectl calls (see Investigator.investigate)
     max_tokens: int = 200_000
     max_cost_usd: float = 0.50
     prompt_tokens: int = 0
@@ -113,8 +126,9 @@ class AgentResult:
 class Investigator:
     def __init__(self, llm: ChatClient, kubectl, audit: AuditLog = NULL_AUDIT, budget: Optional[Budget] = None,
                  cfg: Optional[LLMConfig] = None, validate: Optional[Callable[[Fix], Optional[str]]] = None,
-                 log: Callable[[str], None] = lambda s: None):
+                 log: Callable[[str], None] = lambda s: None, limits: Optional[ToolLimits] = None):
         self.llm = llm
+        self.limits = limits or ToolLimits()
         self.kc = kubectl
         self.audit = audit
         self.budget = budget or Budget()
@@ -135,10 +149,26 @@ class Investigator:
             return f"ERROR: {e}"
 
     def investigate(self, task: str) -> AgentResult:
+        """Ask the AI until it proposes a fix or finishes, within the caps.
+
+        Step budget: each assistant turn uses one step, except that a turn which executes kubectl calls
+        uses one step per executed call, so batching several calls in one turn cannot bypass max_steps.
+        Inner tool-error loop: consecutive failed kubectl results are counted (a success resets the count);
+        after limits.nudge_after_errors the AI is told to change approach or finish, after
+        limits.stop_after_errors the investigation stops. An exact repeat of a call that just failed is
+        refused without running it and counts as an error."""
         res = AgentResult()
         messages: List[dict] = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": task}]
         nudged = False
-        for step in range(self.budget.max_steps):
+        lim = self.limits
+        used = 0                 # steps used
+        errors = 0               # consecutive failed kubectl results
+        failed: List[list] = []  # argv of the failed calls in the current error streak
+        step = 0
+        while True:
+            if used >= self.budget.max_steps:
+                res.stopped = f"step cap reached ({self.budget.max_steps})"
+                break
             why = self.budget.exhausted()
             if why:
                 res.stopped = why
@@ -155,22 +185,38 @@ class Investigator:
             msg = dict(resp.message or {})
             msg.setdefault("role", "assistant")
             calls = msg.get("tool_calls") or []
-            self.audit.write("llm_call", actor="ai", outcome="ok", step=step, model=getattr(self.llm, "name", "?"), secs=round(time.time() - t0, 2),
-                             usage=resp.usage, content=redact_text(msg.get("content") or "")[:2000],
+            fin = getattr(resp, "finish_reason", None)
+            truncated = fin == "length"
+            self.audit.write("llm_call", actor="ai", outcome="warn" if truncated else "ok",
+                             reason="response cut off at the output token limit (finish_reason length)" if truncated else "",
+                             step=step, model=getattr(self.llm, "name", "?"), secs=round(time.time() - t0, 2),
+                             usage=resp.usage, finish_reason=fin, content=redact_text(msg.get("content") or "")[:2000],
                              tool_calls=[{"name": c.get("function", {}).get("name"),
                                           "arguments": redact_text(c.get("function", {}).get("arguments", ""))[:2000]} for c in calls])
             messages.append({k: v for k, v in msg.items() if k in ("role", "content", "tool_calls")})
+            step += 1
             if not calls:
+                used += 1
                 if nudged:
                     res.summary = (msg.get("content") or "").strip()
-                    res.stopped = "model answered without a tool call"
+                    res.stopped = "model answered without a tool call" + (" (response cut off at the token limit)" if truncated else "")
                     break
-                messages.append({"role": "user", "content": "Call propose_fix with exactly one fix, or finish."})
+                messages.append({"role": "user", "content": ("Your last answer was cut off. " if truncated else "")
+                                 + "Call propose_fix with exactly one fix, or finish."})
                 nudged = True
                 continue
-            for c in calls:
+            executed = 0
+            stop = ""
+            for i, c in enumerate(calls):
                 fn = c.get("function", {}) or {}
                 name = fn.get("name")
+                if i >= lim.max_calls_per_turn:
+                    out = f"ERROR: too many tool calls in one turn (max {lim.max_calls_per_turn}); this call was not executed"
+                    messages.append({"role": "tool", "tool_call_id": c.get("id", ""), "content": out})
+                    continue
+                if stop:
+                    messages.append({"role": "tool", "tool_call_id": c.get("id", ""), "content": f"ERROR: not executed; {stop}"})
+                    continue
                 try:
                     args = json.loads(fn.get("arguments") or "{}")
                 except json.JSONDecodeError:
@@ -178,9 +224,26 @@ class Investigator:
                 if not isinstance(args, dict):
                     out = "ERROR: arguments were not a JSON object"
                 elif name == "kubectl":
-                    res.tool_steps += 1
-                    self.log(f"  [llm] kubectl {' '.join(str(a) for a in args.get('args', []))}")
-                    out = self._kubectl(args.get("args"))
+                    argv = args.get("args")
+                    key = [str(a) for a in argv] if isinstance(argv, list) else argv
+                    if key in failed:
+                        out = "REFUSED: this exact kubectl call just failed; not run again. Change the arguments, try a different command, or call finish."
+                    elif used + executed >= self.budget.max_steps:
+                        out = f"ERROR: step budget used up ({self.budget.max_steps}); this call was not executed"
+                        stop = out[len("ERROR: "):]
+                    else:
+                        executed += 1
+                        res.tool_steps += 1
+                        self.log(f"  [llm] kubectl {' '.join(str(a) for a in (argv if isinstance(argv, list) else []))}")
+                        out = self._kubectl(argv)
+                    if tool_failed(out):
+                        errors += 1
+                        if key not in failed:
+                            failed.append(key)
+                        if errors >= lim.stop_after_errors and not stop:
+                            stop = f"tool error limit: {errors} failed kubectl calls in a row"
+                    else:
+                        errors, failed = 0, []
                 elif name == "propose_fix":
                     prop, err = self._proposal(args)
                     if prop:
@@ -196,8 +259,20 @@ class Investigator:
                 else:
                     out = f"ERROR: unknown tool {name}"
                 messages.append({"role": "tool", "tool_call_id": c.get("id", ""), "content": out})
-        else:
-            res.stopped = f"step cap reached ({self.budget.max_steps})"
+            used += max(1, executed)
+            if stop.startswith("tool error limit"):
+                res.stopped = stop
+                self.audit.write("llm_task", actor="kubeagt", outcome="fail", reason=stop,
+                                 consecutive_errors=errors, limit=lim.stop_after_errors,
+                                 last_errors=[redact_text(m["content"])[:300] for m in messages[-errors:] if m.get("role") == "tool"])
+                break
+            if stop:
+                res.stopped = f"step cap reached ({self.budget.max_steps})"
+                break
+            if errors >= lim.nudge_after_errors:
+                messages.append({"role": "user", "content":
+                                 f"The last {errors} kubectl calls failed. Change your approach (a different command or resource), "
+                                 f"or call finish. The investigation stops after {lim.stop_after_errors} failed calls in a row."})
         res.transcript = messages
         return res
 
@@ -209,6 +284,9 @@ class Investigator:
             k, n, pt, patch = KubeWriter.normalize(a.get("kind", ""), a.get("name", ""), a.get("patch_type", "json"), patch)
         except (ToolRefused, ValueError) as e:
             return None, str(e)
+        missing = [f for f in ("diagnosis", "reasoning") if not str(a.get(f) or "").strip()]
+        if missing:
+            return None, f"required field(s) empty: {', '.join(missing)}"
         kind = {"deployment": "Deployment", "statefulset": "StatefulSet", "daemonset": "DaemonSet", "service": "Service",
                 "configmap": "ConfigMap", "persistentvolumeclaim": "PersistentVolumeClaim"}[k]
         change = str(a.get("change") or "").strip()

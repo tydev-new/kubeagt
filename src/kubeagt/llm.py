@@ -89,6 +89,31 @@ class LLMConfig:
 class ChatResponse:
     message: Dict[str, Any]
     usage: Dict[str, int] = field(default_factory=dict)
+    finish_reason: Optional[str] = None
+
+
+def parse_completion(payload: Any) -> ChatResponse:
+    """Check an OpenAI-format chat completion body; raise LLMError on an empty or malformed one."""
+    if not isinstance(payload, dict):
+        raise LLMError("malformed API response: body is not a JSON object")
+    if payload.get("error") and not payload.get("choices"):
+        err = payload["error"]
+        err = err.get("message", err) if isinstance(err, dict) else err
+        raise LLMError(f"API returned an error: {redact_text(str(err))[:300]}")
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise LLMError("malformed API response: no choices")
+    choice = choices[0]
+    msg = choice.get("message")
+    if not isinstance(msg, dict):
+        raise LLMError("malformed API response: choice has no message")
+    calls = msg.get("tool_calls")
+    if calls is not None and not isinstance(calls, list):
+        raise LLMError("malformed API response: tool_calls is not a list")
+    if not (msg.get("content") or "").strip() and not calls:
+        raise LLMError(f"empty API response: no content and no tool calls (finish_reason {choice.get('finish_reason')})")
+    usage = payload.get("usage")
+    return ChatResponse(message=msg, usage=usage if isinstance(usage, dict) else {}, finish_reason=choice.get("finish_reason"))
 
 
 class ChatClient:
@@ -130,10 +155,12 @@ class OpenAICompatClient(ChatClient):
                 "User-Agent": "kubeagt/0.1", **self._extra_headers()})
             try:
                 with urllib.request.urlopen(req, timeout=self.cfg.timeout) as r:
-                    payload = json.loads(r.read().decode("utf-8"))
-                choice = (payload.get("choices") or [{}])[0]
-                msg = choice.get("message") or {}
-                return ChatResponse(message=msg, usage=payload.get("usage") or {})
+                    raw = r.read().decode("utf-8", "replace")
+                try:
+                    payload = json.loads(raw)
+                except ValueError:
+                    raise LLMError("malformed API response: body is not JSON") from None
+                return parse_completion(payload)
             except urllib.error.HTTPError as e:
                 detail = redact_text(e.read().decode("utf-8", "replace"))[:500]
                 last_err = f"HTTP {e.code}: {detail}"
@@ -278,7 +305,7 @@ class HintFollowingMock(ChatClient):
             return ChatResponse({"role": "assistant", "content": None, "tool_calls": [tool_call("propose_fix", {
                 "kind": h["kind"], "name": h["name"], "patch_type": h["patch_type"], "patch": h["patch"],
                 "change": h.get("summary", ""),
-                "diagnosis": h.get("diagnosis", ""), "evidence": h.get("evidence", []),
+                "diagnosis": h.get("diagnosis") or h.get("summary") or "Mock provider: rule finding " + str(h.get("rule")), "evidence": h.get("evidence", []),
                 "reasoning": "Mock provider: accepting deterministic candidate " + h.get("rule", ""),
                 "rule": h.get("rule")}, f"m{3 + idx}")]}, usage)
         return ChatResponse({"role": "assistant", "content": None, "tool_calls": [
