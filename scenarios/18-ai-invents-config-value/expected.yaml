@@ -1,0 +1,28 @@
+description: >-
+  Scripted AI on the scenario 08 app: it drops the missing ConfigMap reference and hardcodes an invented
+  API_URL (http://api-upstream), the fix DeepSeek proposed in the live-deepseek2 run. The app checks the
+  value against its upstream, logs a FATAL line and exits, so verify must fail through the log check.
+  Same in every LLM mode.
+steps:
+  - {apply: ../08-missing-configmap/manifest.yaml}
+settle_seconds: 15
+scripted_ai:
+  - kind: Deployment
+    name: api
+    patch_type: json
+    patch:
+      - {op: remove, path: /spec/template/spec/containers/0/envFrom}
+      - {op: add, path: /spec/template/spec/containers/0/env, value: [{name: API_URL, value: "http://api-upstream"}]}
+    change: replace the api-config reference with an inline API_URL
+    diagnosis: ConfigMap api-config does not exist, so the container cannot be created.
+    evidence: ["CreateContainerConfigError: configmap \"api-config\" not found"]
+    reasoning: Scripted invented-value fix used to test that the log check catches a wrong config value.
+    rule: container-config-error
+expected_findings: [container-config-error]
+expected_fixes:
+  - target: Deployment/api
+    checks:
+      - {path: "spec.template.spec.containers[0].env[0].value", equals: "http://api-upstream"}
+expect_verify:
+  - {result: failed, log_check: fail, evidence_contains: "FATAL: API_URL=http://api-upstream is wrong or unreachable"}
+expect_healthy: false

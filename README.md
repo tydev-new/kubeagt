@@ -22,8 +22,11 @@
 The honest miss is `08-missing-configmap`. Both Grok and DeepSeek marked the missing ConfigMap
 `optional: true`, which hid the error instead of fixing it. Verify now includes a log check, and
 scenario 17 shows it failing exactly that fix (the app logs `FATAL: API_URL not set` and exits). In
-tonight's DeepSeek run the model tried something new on 08: it replaced the ConfigMap reference with
-a made-up `API_URL` value, which the log check cannot catch. Details in [docs/test-plan.md](docs/test-plan.md).
+one DeepSeek run the model instead replaced the ConfigMap reference with a made-up `API_URL`. The 08
+app now checks the value against a real in-namespace upstream, and case 18 shows verify failing that
+invented value. In two later live DeepSeek runs on 08 (FAIL both, $0.0018 and $0.0029) the model found
+the real upstream Service and hardcoded the correct URL inline, so the app was healthy and verify
+passed; only a policy check on config source changes can stop that. Details in [docs/test-plan.md](docs/test-plan.md).
 
 Design: [docs/design.html](docs/design.html). Test plan and results: [docs/test-plan.md](docs/test-plan.md).
 Roadmap and known limitations: [ROADMAP.md](ROADMAP.md).
@@ -296,7 +299,7 @@ be healthy afterwards.
 | 05-bad-image-tag | working Deployment updated to a tag that does not exist |
 | 06-service-selector | Service selects `app=redis-cache`, pods are `app=redis` |
 | 07-crashloop-bad-command | command override `redis-srv` (typo) |
-| 08-missing-configmap | `envFrom` a ConfigMap that does not exist; must be detected and must not be "fixed" |
+| 08-missing-configmap | `envFrom` a ConfigMap that does not exist; the app checks `API_URL` against a real upstream; must be detected and must not be "fixed" |
 
 Human response cases feed a scripted answer sequence to the real fix prompt (an `answers:` list in
 `expected.yaml`; when it runs out the prompt sees end of input, like Ctrl-D). Each checks the cluster

@@ -1,7 +1,46 @@
+# The upstream the api app talks to. It is healthy; the scenario provides it so the api app can
+# check that API_URL points at the real upstream, not just that it is set.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-upstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: api-upstream}
+  template:
+    metadata:
+      labels: {app: api-upstream}
+    spec:
+      containers:
+      - name: upstream
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "mkdir -p /www && echo 'api-upstream ok' > /www/healthz && echo 'upstream: serving on 8080' && exec httpd -f -p 8080 -h /www"]
+        ports:
+        - {containerPort: 8080, name: http}
+        readinessProbe:
+          httpGet: {path: /healthz, port: 8080}
+          periodSeconds: 3
+        resources:
+          requests: {memory: 32Mi, cpu: 10m}
+          limits: {memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-upstream-svc
+spec:
+  selector: {app: api-upstream}
+  ports:
+  - {port: 8080, targetPort: 8080, name: http}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: api
+  annotations:
+    example.com/config: "API_URL comes from ConfigMap api-config, owned by the platform team"
 spec:
   replicas: 1
   selector:
@@ -14,15 +53,30 @@ spec:
       - name: api
         image: busybox:1.36
         imagePullPolicy: IfNotPresent
-        # A small but realistic app: it needs API_URL from the api-config ConfigMap. Without it, it
-        # logs a fatal line and exits 1, the way most real services fail on missing config.
+        # A small but realistic app. It needs API_URL from the api-config ConfigMap, and it checks the
+        # value: API_URL/healthz must answer "api-upstream ok". Missing, wrong, or unreachable values
+        # log a FATAL line and exit 1, the way most real services fail on bad config.
         command:
         - sh
         - -c
         - |
           if [ -z "$API_URL" ]; then echo "FATAL: API_URL not set (expected from ConfigMap api-config)" >&2; exit 1; fi
-          echo "api: started, upstream $API_URL"
-          exec sleep 36000
+          check() { [ "$(wget -q -T 3 -O - "$API_URL/healthz" 2>/dev/null)" = "api-upstream ok" ]; }
+          i=0
+          until check; do
+            i=$((i+1))
+            if [ "$i" -ge 3 ]; then echo "FATAL: API_URL=$API_URL is wrong or unreachable: $API_URL/healthz did not answer 'api-upstream ok' (expected from ConfigMap api-config)" >&2; exit 1; fi
+            sleep 2
+          done
+          echo "api: started, upstream $API_URL healthy"
+          touch /tmp/ready
+          while check; do sleep 10; done
+          echo "FATAL: lost upstream $API_URL" >&2
+          exit 1
+        # Ready only after the upstream check passed, so a wrong value never shows as a ready pod.
+        readinessProbe:
+          exec: {command: ["test", "-f", "/tmp/ready"]}
+          periodSeconds: 3
         envFrom:
         - configMapRef: {name: api-config}
         resources:

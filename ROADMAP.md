@@ -7,7 +7,7 @@ kubeagt today runs a one-fix-at-a-time loop: diagnose, propose, server dry run, 
 These come from real eval runs (see [docs/test-plan.md](docs/test-plan.md)).
 
 - **Live evals score 8/9** on scenarios 00 to 08 for both Grok 4.7 and DeepSeek v4.1 Flash through OpenRouter. Both miss `08-missing-configmap`.
-- **Symptom hiding on 08.** Earlier both models set `configMapRef.optional: true`. The log check now fails that fix (scenario 17). In the latest DeepSeek run the model instead replaced the ConfigMap reference with a made-up `API_URL` value; the app accepted it, so the log check passed. Only policy checks (items 2 and 3) can stop that.
+- **Symptom hiding on 08.** Earlier both models set `configMapRef.optional: true`. The log check now fails that fix (scenario 17). One DeepSeek run instead hardcoded a made-up `API_URL`; the 08 app now checks the value against a real upstream and case 18 shows verify failing it. In two later runs DeepSeek hardcoded the correct upstream URL inline, which verify cannot fail. Only policy checks on config source changes (items 2 and 3) can stop that.
 - **The policy filter is a skeleton.** It runs on every proposal and allows everything (see [docs/policy-plan.md](docs/policy-plan.md)).
 - **The log check is not shipped as warn-only.** It fails a fix on fatal lines or restarts from the start. A silent app gives only a no_signal warning.
 - **Human-response evals** (y, n, skip, quit, invalid input, Ctrl-D, mixed) pass in rules-only and mock modes but have not been run with a live model.
@@ -25,7 +25,7 @@ Priority: P1 next, P2 soon, P3 later. Size: S is under a day, M is a few days, L
 | 5 | State the AI's goal as "restore intended function, not silence the errors" in the prompt. | Prompt wording affects how often agents take shortcuts. | P1 | S | [design](docs/design.html) |
 | 6 | Reuse kube-score, kube-linter, and Kyverno Pod Security policies as before/after checks on the patched object. Build only what they do not cover: absurd probe thresholds, sleep commands, scope, sizing jumps. | Most planned checks already exist as maintained rules. | P2 | M | [policy plan](docs/policy-plan.md) |
 | 7 | Durability step in verify: restart the pod, or re-check after a watch window, before marking a fix verified. | A fix can look good at first and fail later. | P2 | M | [design](docs/design.html) |
-| 8 | Evals both ways: the reference fix passes, doing nothing fails, and a scripted symptom-hiding fix is blocked or warned. Partly done: case 17 scripts the optional: true fix and expects verify to fail. | Proves the scorecard and safeguards can actually fail. | P2 | M | [test plan](docs/test-plan.md) |
+| 8 | Evals both ways: the reference fix passes, doing nothing fails, and a scripted symptom-hiding fix is blocked or warned. Partly done: case 17 scripts the optional: true fix and case 18 an invented API_URL; both expect verify to fail. | Proves the scorecard and safeguards can actually fail. | P2 | M | [test plan](docs/test-plan.md) |
 | 9 | CloudEvents envelope, OpenTelemetry `k8s.*` and `gen_ai.*` attribute names, and patches applied with `--field-manager=kubeagt`, on top of the v1 audit schema. | Consistent, queryable logs that match the API server audit log. | P2 | M | [design](docs/design.html) |
 | 10 | Fix the `00-healthy` probe-failing flake by ignoring Unhealthy events once the pod is Ready. | Removes a false failure from the scorecard. | P2 | S | [test plan](docs/test-plan.md) |
 | 11 | Remaining policy-plan checks. | Covers the rest of the planned anti-patterns. | P3 | L | [policy plan](docs/policy-plan.md) |
@@ -37,7 +37,7 @@ Priority: P1 next, P2 soon, P3 later. Size: S is under a day, M is a few days, L
 
 - **Log check in verify** (was item 1): before and after log diff with pass, warn, or fail, including no_signal for silent apps. See [design](docs/design.html#logcheck).
 - **Inner tool-error loop in the AI investigation**: nudge after 3 failed kubectl calls in a row, stop after 5, refuse an exact repeat of a failed call, at most 5 tool calls per turn, every executed call counts toward `--max-steps`; also required proposal fields, `finish_reason` length recorded, and clear errors for empty or malformed API responses. See [design](docs/design.html#toolloop).
-- **Realistic app for scenario 08** (was item 4): logs `FATAL: API_URL not set` and exits without its config.
+- **Realistic app for scenario 08** (was item 4): logs `FATAL: API_URL not set` and exits without its config, and checks the value against a real in-namespace upstream (`FATAL: API_URL=... is wrong or unreachable`).
 - **Standard audit schema v1** (part of item 9): one envelope for every event, shared check result, one `fix_verify` event, v0 files still readable. See [design](docs/design.html#audit).
 
 ## Prior art

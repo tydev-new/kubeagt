@@ -211,6 +211,28 @@ def test_eval_expect_verify_and_scripted_ai(tmp_path):
     assert not check_verify(spec, [])[0]["ok"]          # a missing fix_verify is a failed expectation
 
 
+def test_scenario_08_checks_the_value_and_18_scripts_an_invented_one(tmp_path):
+    """Scenario 08 ships the real upstream and an app that checks API_URL against it; case 18 hardcodes a
+    wrong value, which the app rejects with a FATAL line the log check fails on."""
+    import yaml
+    from kubeagt.evals import check_verify, default_scenarios_dir, scripted_ai
+    d = default_scenarios_dir()
+    docs = list(yaml.safe_load_all((d / "08-missing-configmap" / "manifest.yaml").read_text()))
+    assert {(x["kind"], x["metadata"]["name"]) for x in docs} >= {("Service", "api-upstream-svc"), ("Deployment", "api")}
+    app = [x for x in docs if x["kind"] == "Deployment" and x["metadata"]["name"] == "api"][0]
+    script = app["spec"]["template"]["spec"]["containers"][0]["command"][2]
+    assert "$API_URL/healthz" in script and "is wrong or unreachable" in script
+    spec = yaml.safe_load((d / "18-ai-invents-config-value" / "expected.yaml").read_text())
+    first = json.loads(scripted_ai(spec).script[0]["tool_calls"][0]["function"]["arguments"])
+    assert first["patch"][1]["value"] == [{"name": "API_URL", "value": "http://api-upstream"}]
+    line = "FATAL: API_URL=http://api-upstream is wrong or unreachable: http://api-upstream/healthz did not answer"
+    rep, _, _, _ = _run(tmp_path, line)
+    assert rep.fixes[0].verify_result == "failed"
+    ev = [{"event": "fix_verify", "detail": {"result": "failed", "checks": [
+        {"check": "log_check", "outcome": "fail", "reason": "x", "evidence": [line]}]}}]
+    assert all(c["ok"] for c in check_verify(spec, ev))
+
+
 def test_service_selector_is_read_again_after_the_fix():
     """Scenario 06: the fix changes the Service selector, so the pods to read are found with the new one."""
     src = Src([[pod("redis-1", labels={"app": "redis"})]], {("redis-1", "api", False): "Ready to accept connections"},
