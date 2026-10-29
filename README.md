@@ -228,6 +228,18 @@ The scorecard (`eval-results/scorecard.md` and `.json`) reports per scenario: de
 healthy after, fixes applied, steps (fix proposals plus LLM tool calls), and time. Transcripts and audit
 logs for each scenario are written next to it.
 
+### Continuous integration
+
+`.github/workflows/ci.yml` is included but runs only when started by hand, never on push or pull
+request. Day to day testing happens on a local kind cluster as shown above. To run it on GitHub, open
+the repo's Actions tab, choose **ci**, and click **Run workflow**. It has two jobs:
+
+- **test**: installs kubeagt on Python 3.9 and 3.12, then runs `ruff check` and `pytest`.
+- **e2e-kind** (on by default, can be unchecked): creates a throwaway kind cluster on the GitHub runner,
+  runs all scenarios with `--llm none` (no API key needed), and uploads the scorecard as an artifact.
+
+It uses no secrets and never connects to any cluster other than the one it creates.
+
 ## How it relates to k8sgpt
 
 [k8sgpt](https://github.com/k8sgpt-ai/k8sgpt) pioneered this space with deterministic analyzers plus a
